@@ -51,8 +51,11 @@ function computeTotals(players, rounds) {
   const totals = {};
   for (const p of players) totals[p.id] = 0;
 
-  for (const r of rounds) {
+  for (let rIdx = 0; rIdx < rounds.length; rIdx++) {
+    const r = rounds[rIdx];
     for (const p of players) {
+      const joinRound = typeof p.joinRound === "number" ? p.joinRound : 0;
+      if (rIdx < joinRound) continue;
       const raw = r.scores?.[p.id];
       const val = typeof raw === "number" ? raw : 0;
       totals[p.id] += val;
@@ -109,6 +112,7 @@ function ensureUniqueNames(players) {
 
 const styles = `
 :root{
+  --rowAlt: #F3F0FA;
   --bg: #F6F4FB;
   --panel: #FCFBFF;
   --text: #0a0a0a;
@@ -242,7 +246,7 @@ a{ color: inherit; }
 }
 .th, .td{
   border-bottom: 1px solid var(--border);
-  padding: 10px 10px;
+  padding: 12px 12px;
   vertical-align: middle;
   background: transparent;
 }
@@ -264,7 +268,7 @@ a{ color: inherit; }
   color: var(--muted);
 }
 .scoreInput{
-  width: 76px;
+  width: 90px;
   padding: 8px 8px;
   border-radius: 12px;
   border: 1px solid var(--border);
@@ -358,8 +362,8 @@ export default function App() {
     notes: "",
     tags: [],
     players: [
-      { id: uid(), name: "Player 1" },
-      { id: uid(), name: "Player 2" },
+      { id: uid(), name: "Player 1", joinRound: 0 },
+      { id: uid(), name: "Player 2", joinRound: 0 },
     ],
     roundLabels: roundsFor5Crowns(), // [3..13]
     rounds: roundsFor5Crowns().map(() => ({ scores: {}, wentOutId: "" })),
@@ -407,7 +411,9 @@ export default function App() {
     if (!current) return {};
     return computeTotals(current.players || [], current.rounds || []);
   }, [current]);
-
+  const currentRoundIndex = current?.rounds?.findIndex((round) =>
+  current.players.some((p) => round.scores?.[p.id] == null)
+  ) ?? 0;
   const roundsWon = useMemo(() => {
     if (!current) return {};
     return computeRoundsWon(current.players || [], current.rounds || []);
@@ -432,13 +438,34 @@ export default function App() {
     });
   }
 
-  function addPlayer(to = "draft") {
-    const fn = to === "edit" ? setEditGame : setDraft;
-    fn((prev) => {
-      const nextPlayers = [...prev.players, { id: uid(), name: `Player ${prev.players.length + 1}` }];
-      return { ...prev, players: nextPlayers };
+  function addLatePlayer() {
+  setDraft((prev) => {
+    const newPlayerId = uid();
+    const newPlayerNumber = prev.players.length + 1;
+
+    const nextPlayers = [
+      ...prev.players,
+      { id: newPlayerId, name: `Player ${newPlayerNumber}` },
+    ];
+
+    const nextRounds = prev.rounds.map((round, idx) => {
+      const scores = { ...(round.scores || {}) };
+
+      if (idx < currentRoundIndex) {
+        scores[newPlayerId] = 0;
+      }
+
+      return { ...round, scores };
     });
-  }
+
+    return {
+      ...prev,
+      players: nextPlayers,
+      rounds: nextRounds,
+    };
+  });
+}
+
 
   function removePlayer(playerId, to = "draft") {
     const fn = to === "edit" ? setEditGame : setDraft;
@@ -644,8 +671,8 @@ export default function App() {
       notes: "",
       tags: [],
       players: [
-        { id: uid(), name: "Player 1" },
-        { id: uid(), name: "Player 2" },
+        { id: uid(), name: "Player 1", joinRound: 0 },
+        { id: uid(), name: "Player 2", joinRound: 0 },
       ],
       roundLabels: roundsFor5Crowns(),
       rounds: roundsFor5Crowns().map(() => ({ scores: {}, wentOutId: "" })),
@@ -688,8 +715,8 @@ export default function App() {
       notes: "",
       tags: [],
       players: [
-        { id: uid(), name: "Player 1" },
-        { id: uid(), name: "Player 2" },
+        { id: uid(), name: "Player 1", joinRound: 0 },
+        { id: uid(), name: "Player 2", joinRound: 0 },
       ],
       roundLabels: roundsFor5Crowns(),
       rounds: roundsFor5Crowns().map(() => ({ scores: {}, wentOutId: "" })),
@@ -790,7 +817,7 @@ export default function App() {
         {(tab === "new" || tab === "score") && (
           <div className="row" style={{ marginBottom: 10 }}>
             <button className="btn" onClick={undo} disabled={!undoStack.length}>
-              ⟲ Undo
+              ⟲ Undo Last Change
             </button>
             <button className="btn" onClick={resetDraft}>
               Reset
@@ -920,10 +947,16 @@ export default function App() {
 
               <div className="row">
                 {tab === "score" && (
-                  <button className="btn primary" onClick={finishAndSave}>
-                    Finish & Save
-                  </button>
+                  <>
+                    <button className="btn" onClick={addLatePlayer}>
+                      + Add Player
+                    </button>
+                    <button className="btn primary" onClick={finishAndSave}>
+                      Finish & Save
+                    </button>
+                  </>
                 )}
+
                 {tab === "edit" && (
                   <>
                     <button className="btn" onClick={() => setTab("history")}>
@@ -974,39 +1007,51 @@ export default function App() {
 
                 <tbody>
                   {current.roundLabels.map((label, rIdx) => (
-                    <tr key={label}>
+                      <tr 
+                        key={label}
+                        style={{
+                          background:
+                            rIdx === currentRoundIndex
+                              ? "#E9DDFB"
+                              : rIdx % 2 === 1
+                              ? "var(--rowAlt)"
+                              : "transparent",
+                        }}
+                      >
+
                       <td className="td round">{"R " + label}</td>
                       {current.players.map((p, pIdx) => {
-                        const val = current.rounds?.[rIdx]?.scores?.[p.id];
-                        const wentOut = (current.rounds?.[rIdx]?.wentOutId || "") === p.id;
+                         const val = current.rounds?.[rIdx]?.scores?.[p.id];
+                          const wentOut = (current.rounds?.[rIdx]?.wentOutId || "") === p.id;
 
                         return (
-                          <td className="td" key={p.id}>
-                            <div className="cell">
-                              <input
-                                className="scoreInput"
-                                inputMode="numeric"
-                                placeholder="0"
-                                value={typeof val === "number" ? String(val) : ""}
-                                ref={(el) => {
-                                  if (!el) return;
-                                  inputRefs.current.set(`${rIdx}_${pIdx}`, el);
-                                }}
-                                onKeyDown={(e) => onScoreKeyDown(e, rIdx, pIdx, context)}
-                                onChange={(e) => onScoreChange(rIdx, pIdx, e.target.value, context)}
-                                onFocus={(e) => e.target.select?.()}
-                              />
-                              <button
-                                className={`starBtn ${wentOut ? "on" : ""}`}
-                                onClick={() => toggleWentOut(rIdx, pIdx, context)}
-                                title={wentOut ? "Unmark went out first" : "Mark went out first"}
-                              >
-                                ⭐
-                              </button>
-                            </div>
-                          </td>
-                        );
-                      })}
+                      <td className="td" key={p.id}>
+                        <div className="cell">
+                          <input
+                            className="scoreInput"
+                            inputMode="numeric"
+                            placeholder="0"
+                            value={typeof val === "number" ? String(val) : ""}
+                            ref={(el) => {
+                              if (!el) return;
+                              inputRefs.current.set(`${rIdx}_${pIdx}`, el);
+                            }}
+                            onKeyDown={(e) => onScoreKeyDown(e, rIdx, pIdx, context)}
+                            onChange={(e) => onScoreChange(rIdx, pIdx, e.target.value, context)}
+                            onFocus={(e) => e.target.select?.()}
+                          />
+                          <button
+                            className={`starBtn ${wentOut ? "on" : ""}`}
+                            onClick={() => toggleWentOut(rIdx, pIdx, context)}
+                            title={wentOut ? "Unmark went out first" : "Mark went out first"}
+                          >
+                            ⭐
+                          </button>
+                        </div>
+                      </td>
+                    );
+                  })}
+
                     </tr>
                   ))}
                 </tbody>
@@ -1231,5 +1276,7 @@ function TagAdder({ onAdd }) {
       </button>
     </div>
   );
+<p style={{fontSize: "12px", opacity: 0.6, textAlign: "center"}}>
+Scores are saved locally on your device. No accounts, no tracking.
+</p>
 }
-
