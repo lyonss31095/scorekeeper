@@ -73,12 +73,34 @@ function computeRoundsWon(players, rounds) {
   }
   return wins;
 }
-
-function winnerIds(players, totals) {
+function getDealerName(players, roundIndex) {
+  if (!players || players.length === 0) return "";
+  const eligible = players.filter((p) => {
+    const joinRound = typeof p.joinRound === "number" ? p.joinRound : 0;
+    return joinRound <= roundIndex;
+  });
+  if (eligible.length === 0) return "";
+  const dealerIndex = roundIndex % eligible.length;
+  return eligible[dealerIndex]?.name || "";
+}
+function winnerIds(players, totals, rounds = []) {
   if (!players.length) return [];
+  const currentRoundIndex = rounds.findIndex((round) =>
+    players.some((p) => round.scores?.[p.id] == null)
+  );
+  const effectiveCurrentRoundIndex =
+    currentRoundIndex === -1 ? rounds.length : currentRoundIndex;
+  const eligiblePlayers = players.filter((p) => {
+    const joinRound = typeof p.joinRound === "number" ? p.joinRound : 0;
+    return joinRound < effectiveCurrentRoundIndex;
+  });
+  if (!eligiblePlayers.length) return [];
   let best = Infinity;
-  for (const p of players) best = Math.min(best, totals[p.id] ?? 0);
-  return players.filter((p) => (totals[p.id] ?? 0) === best).map((p) => p.id);
+  for (const p of eligiblePlayers) best = Math.min(best, totals[p.id] ?? 0);
+
+  return eligiblePlayers
+    .filter((p) => (totals[p.id] ?? 0) === best)
+    .map((p) => p.id);
 }
 
 function formatDate(iso) {
@@ -381,55 +403,7 @@ export default function App() {
   // refs for score inputs (for Enter navigation)
   const inputRefs = useRef(new Map()); // key: `${r}_${c}` -> element
 
-  // Load history + draft
-  useEffect(() => {
-    const h = safeParse(localStorage.getItem(LS_HISTORY) || "[]", []);
-    setHistory(Array.isArray(h) ? h : []);
 
-    const d = safeParse(localStorage.getItem(LS_DRAFT) || "null", null);
-    if (d && d.players && d.rounds && d.roundLabels) {
-      setDraft(d);
-    }
-  }, []);
-
-  // Autosave history
-  useEffect(() => {
-    localStorage.setItem(LS_HISTORY, JSON.stringify(history));
-  }, [history]);
-
-  // Autosave draft after every change
-  useEffect(() => {
-    // Only autosave when draft is in play (new/score tabs)
-    if (tab === "new" || tab === "score") {
-      localStorage.setItem(LS_DRAFT, JSON.stringify(draft));
-    }
-  }, [draft, tab]);
-
-  const current = tab === "edit" ? editGame : draft;
-
-  const totals = useMemo(() => {
-    if (!current) return {};
-    return computeTotals(current.players || [], current.rounds || []);
-  }, [current]);
-  const currentRoundIndex = current?.rounds?.findIndex((round) =>
-  current.players.some((p) => round.scores?.[p.id] == null)
-  ) ?? 0;
-  const roundsWon = useMemo(() => {
-    if (!current) return {};
-    return computeRoundsWon(current.players || [], current.rounds || []);
-  }, [current]);
-
-  const winners = useMemo(() => {
-    if (!current) return [];
-    return winnerIds(current.players || [], totals);
-  }, [current, totals]);
-
-  function setDraftField(field, value) {
-    setDraft((prev) => {
-      const next = { ...prev, [field]: value };
-      return next;
-    });
-  }
 
   function setEditField(field, value) {
     setEditGame((prev) => {
@@ -445,7 +419,7 @@ export default function App() {
 
     const nextPlayers = [
       ...prev.players,
-      { id: newPlayerId, name: `Player ${newPlayerNumber}` },
+      { id: newPlayerId, name: `Player ${newPlayerNumber}`, joinRound: currentRoundIndex },
     ];
 
     const nextRounds = prev.rounds.map((round, idx) => {
@@ -539,254 +513,294 @@ export default function App() {
       })
     );
 
-    const fn = to === "edit" ? setEditGame : setDraft;
-    fn((prev) => {
-      const rounds = prev.rounds.map((r, i) => {
-        if (i !== rIdx) return r;
-        const scores = { ...(r.scores || {}) };
-        if (nextVal === null) delete scores[playerId];
-        else scores[playerId] = nextVal;
-        return { ...r, scores };
-      });
-      return { ...prev, rounds };
-    });
-  }
-
-  function toggleWentOut(rIdx, pIdx, to = "draft") {
-    const game = to === "edit" ? editGame : draft;
-    const playerId = game.players[pIdx].id;
-    const prevWentOutId = game.rounds[rIdx].wentOutId || "";
-
-    setUndoStack((s) =>
-      pushUndo(s, {
-        type: "wentout",
-        to,
-        rIdx,
-        prevWentOutId,
-      })
-    );
-
-    const fn = to === "edit" ? setEditGame : setDraft;
-    fn((prev) => {
-      const rounds = prev.rounds.map((r, i) => {
-        if (i !== rIdx) return r;
-        const next = r.wentOutId === playerId ? "" : playerId;
-        return { ...r, wentOutId: next };
-      });
-      return { ...prev, rounds };
-    });
-  }
-
-  function undo() {
-    const [top, ...rest] = undoStack;
-    if (!top) return;
-
-    setUndoStack(rest);
-
-    const fn = top.to === "edit" ? setEditGame : setDraft;
-
-    if (top.type === "score") {
+      const fn = to === "edit" ? setEditGame : setDraft;
       fn((prev) => {
-        const playerId = top.playerId;
         const rounds = prev.rounds.map((r, i) => {
-          if (i !== top.rIdx) return r;
+          if (i !== rIdx) return r;
           const scores = { ...(r.scores || {}) };
-          if (top.prevVal === null || top.prevVal === undefined) delete scores[playerId];
-          else scores[playerId] = top.prevVal;
+          if (nextVal === null) delete scores[playerId];
+          else scores[playerId] = nextVal;
           return { ...r, scores };
         });
         return { ...prev, rounds };
       });
-      // restore focus
-      focusCell(top.rIdx, top.pIdx);
-      return;
     }
 
-    if (top.type === "wentout") {
+    function toggleWentOut(rIdx, pIdx, to = "draft") {
+      const game = to === "edit" ? editGame : draft;
+      const playerId = game.players[pIdx].id;
+      const prevWentOutId = game.rounds[rIdx].wentOutId || "";
+
+      setUndoStack((s) =>
+        pushUndo(s, {
+          type: "wentout",
+          to,
+          rIdx,
+          prevWentOutId,
+        })
+      );
+
+      const fn = to === "edit" ? setEditGame : setDraft;
       fn((prev) => {
         const rounds = prev.rounds.map((r, i) => {
-          if (i !== top.rIdx) return r;
-          return { ...r, wentOutId: top.prevWentOutId || "" };
+          if (i !== rIdx) return r;
+          const next = r.wentOutId === playerId ? "" : playerId;
+          return { ...r, wentOutId: next };
         });
         return { ...prev, rounds };
       });
-      return;
     }
-  }
 
-  function focusCell(rIdx, pIdx) {
-    const key = `${rIdx}_${pIdx}`;
-    const el = inputRefs.current.get(key);
-    if (el && typeof el.focus === "function") el.focus();
-  }
+    function undo() {
+      const [top, ...rest] = undoStack;
+      if (!top) return;
 
-  function onScoreKeyDown(e, rIdx, pIdx, to = "draft") {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      // move right; if last column, move to next row first column
-      const game = to === "edit" ? editGame : draft;
-      const lastCol = (game.players?.length ?? 1) - 1;
-      const lastRow = (game.rounds?.length ?? 1) - 1;
+      setUndoStack(rest);
 
-      let nextR = rIdx;
-      let nextC = pIdx + 1;
+      const fn = top.to === "edit" ? setEditGame : setDraft;
 
-      if (pIdx >= lastCol) {
-        nextC = 0;
-        nextR = Math.min(lastRow, rIdx + 1);
+      if (top.type === "score") {
+        fn((prev) => {
+          const playerId = top.playerId;
+          const rounds = prev.rounds.map((r, i) => {
+            if (i !== top.rIdx) return r;
+            const scores = { ...(r.scores || {}) };
+            if (top.prevVal === null || top.prevVal === undefined) delete scores[playerId];
+            else scores[playerId] = top.prevVal;
+            return { ...r, scores };
+          });
+          return { ...prev, rounds };
+        });
+        // restore focus
+        focusCell(top.rIdx, top.pIdx);
+        return;
       }
-      focusCell(nextR, nextC);
-    }
-  }
 
-  function validateForStart(game) {
-    if (!game.players || game.players.length < 2) return "Add at least 2 players.";
-    const cleaned = ensureUniqueNames(game.players);
-    // ensure no blank
-    if (cleaned.some((p) => !(p.name || "").trim())) return "Player names can’t be blank.";
-    return "";
-  }
-
-  function startGame() {
-    const err = validateForStart(draft);
-    if (err) {
-      alert(err);
-      return;
-    }
-    // normalize names unique
-    setDraft((prev) => ({ ...prev, players: ensureUniqueNames(prev.players) }));
-    setTab("score");
-    // focus first cell
-    setTimeout(() => focusCell(0, 0), 0);
-  }
-
-  function resetDraft() {
-    if (!confirm("Reset current game?")) return;
-    const fresh = {
-      id: uid(),
-      gameType: "5crowns",
-      name: "",
-      createdAt: new Date().toISOString(),
-      location: "",
-      notes: "",
-      tags: [],
-      players: [
-        { id: uid(), name: "Player 1", joinRound: 0 },
-        { id: uid(), name: "Player 2", joinRound: 0 },
-      ],
-      roundLabels: roundsFor5Crowns(),
-      rounds: roundsFor5Crowns().map(() => ({ scores: {}, wentOutId: "" })),
-    };
-    setDraft(fresh);
-    setUndoStack([]);
-    localStorage.setItem(LS_DRAFT, JSON.stringify(fresh));
-    setTab("new");
-  }
-
-  function finishAndSave() {
-    const err = validateForStart(draft);
-    if (err) {
-      alert(err);
-      return;
+      if (top.type === "wentout") {
+        fn((prev) => {
+          const rounds = prev.rounds.map((r, i) => {
+            if (i !== top.rIdx) return r;
+            return { ...r, wentOutId: top.prevWentOutId || "" };
+          });
+          return { ...prev, rounds };
+        });
+        return;
+      }
     }
 
-    const normalizedPlayers = ensureUniqueNames(draft.players);
-    const normalizedDraft = { ...draft, players: normalizedPlayers };
+    function focusCell(rIdx, pIdx) {
+      const key = `${rIdx}_${pIdx}`;
+      const el = inputRefs.current.get(key);
+      if (el && typeof el.focus === "function") el.focus();
+    }
 
-    const t = computeTotals(normalizedPlayers, normalizedDraft.rounds);
-    const w = winnerIds(normalizedPlayers, t);
+    function onScoreKeyDown(e, rIdx, pIdx, to = "draft") {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        // move right; if last column, move to next row first column
+        const game = to === "edit" ? editGame : draft;
+        const lastCol = (game.players?.length ?? 1) - 1;
+        const lastRow = (game.rounds?.length ?? 1) - 1;
 
-    const saved = {
-      ...normalizedDraft,
-      createdAt: normalizedDraft.createdAt || new Date().toISOString(),
-      savedAt: new Date().toISOString(),
-      totals: t,
-      winnerIds: w,
-    };
+        let nextR = rIdx;
+        let nextC = pIdx + 1;
 
-    setHistory((prev) => [saved, ...prev]);
-    // reset draft after saving
-    const fresh = {
-      id: uid(),
-      gameType: "5crowns",
-      name: "",
-      createdAt: new Date().toISOString(),
-      location: "",
-      notes: "",
-      tags: [],
-      players: [
-        { id: uid(), name: "Player 1", joinRound: 0 },
-        { id: uid(), name: "Player 2", joinRound: 0 },
-      ],
-      roundLabels: roundsFor5Crowns(),
-      rounds: roundsFor5Crowns().map(() => ({ scores: {}, wentOutId: "" })),
-    };
-    setDraft(fresh);
-    setUndoStack([]);
-    localStorage.setItem(LS_DRAFT, JSON.stringify(fresh));
-    setTab("history");
-  }
+        if (pIdx >= lastCol) {
+          nextC = 0;
+          nextR = Math.min(lastRow, rIdx + 1);
+        }
+        focusCell(nextR, nextC);
+      }
+    }
 
-  function openForEdit(gameId) {
-    const g = history.find((x) => x.id === gameId);
-    if (!g) return;
-    setEditGameId(gameId);
-    // deep-ish clone to avoid editing history object directly
-    setEditGame(JSON.parse(JSON.stringify(g)));
-    setUndoStack([]);
-    setTab("edit");
-    setTimeout(() => focusCell(0, 0), 0);
-  }
+    function validateForStart(game) {
+      if (!game.players || game.players.length < 2) return "Add at least 2 players.";
+      const cleaned = ensureUniqueNames(game.players);
+      // ensure no blank
+      if (cleaned.some((p) => !(p.name || "").trim())) return "Player names can’t be blank.";
+      return "";
+    }
 
-  function saveEdits() {
-    if (!editGame) return;
-    const normalizedPlayers = ensureUniqueNames(editGame.players || []);
-    const updated = { ...editGame, players: normalizedPlayers };
+    function startGame() {
+      const err = validateForStart(draft);
+      if (err) {
+        alert(err);
+        return;
+      }
+      // normalize names unique
+      setDraft((prev) => ({ ...prev, players: ensureUniqueNames(prev.players) }));
+      setTab("score");
+      // focus first cell
+      setTimeout(() => focusCell(0, 0), 0);
+    }
 
-    const t = computeTotals(updated.players, updated.rounds);
-    const w = winnerIds(updated.players, t);
-    const finalGame = { ...updated, totals: t, winnerIds: w, editedAt: new Date().toISOString() };
+    function resetDraft() {
+      if (!confirm("Reset current game?")) return;
+      const fresh = {
+        id: uid(),
+        gameType: "5crowns",
+        name: "",
+        createdAt: new Date().toISOString(),
+        location: "",
+        notes: "",
+        tags: [],
+        players: [
+          { id: uid(), name: "Player 1", joinRound: 0 },
+          { id: uid(), name: "Player 2", joinRound: 0 },
+        ],
+        roundLabels: roundsFor5Crowns(),
+        rounds: roundsFor5Crowns().map(() => ({ scores: {}, wentOutId: "" })),
+      };
+      setDraft(fresh);
+      setUndoStack([]);
+      localStorage.setItem(LS_DRAFT, JSON.stringify(fresh));
+      setTab("new");
+    }
 
-    setHistory((prev) => prev.map((g) => (g.id === editGameId ? finalGame : g)));
-    setTab("history");
-    setEditGameId("");
-    setEditGame(null);
-    setUndoStack([]);
-  }
+    function finishAndSave() {
+      const err = validateForStart(draft);
+      if (err) {
+        alert(err);
+        return;
+      }
 
-  function deleteGame(gameId) {
-    if (!confirm("Delete this saved game? This cannot be undone.")) return;
-    setHistory((prev) => prev.filter((g) => g.id !== gameId));
-    if (editGameId === gameId) {
-      setEditGameId("");
-      setEditGame(null);
+      const normalizedPlayers = ensureUniqueNames(draft.players);
+      const normalizedDraft = { ...draft, players: normalizedPlayers };
+
+      const t = computeTotals(normalizedPlayers, normalizedDraft.rounds);
+      const w = winnerIds(normalizedPlayers, t);
+
+      const saved = {
+        ...normalizedDraft,
+        createdAt: normalizedDraft.createdAt || new Date().toISOString(),
+        savedAt: new Date().toISOString(),
+        totals: t,
+        winnerIds: w,
+      };
+
+      setHistory((prev) => [saved, ...prev]);
+      // reset draft after saving
+      const fresh = {
+        id: uid(),
+        gameType: "5crowns",
+        name: "",
+        createdAt: new Date().toISOString(),
+        location: "",
+        notes: "",
+        tags: [],
+        players: [
+          { id: uid(), name: "Player 1", joinRound: 0 },
+          { id: uid(), name: "Player 2", joinRound: 0 },
+        ],
+        roundLabels: roundsFor5Crowns(),
+        rounds: roundsFor5Crowns().map(() => ({ scores: {}, wentOutId: "" })),
+      };
+      setDraft(fresh);
+      setUndoStack([]);
+      localStorage.setItem(LS_DRAFT, JSON.stringify(fresh));
       setTab("history");
     }
-  }
 
-  const filteredHistory = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const tf = tagFilter.trim();
-    return history.filter((g) => {
-      if (tf && !(g.tags || []).includes(tf)) return false;
-      if (!q) return true;
-      const blob = [
-        g.name,
-        g.location,
-        g.notes,
-        ...(g.tags || []),
-        ...(g.players || []).map((p) => p.name),
-      ]
-        .filter(Boolean)
-        .join(" | ")
-        .toLowerCase();
-      return blob.includes(q);
-    });
-  }, [history, search, tagFilter]);
+    function openForEdit(gameId) {
+      const g = history.find((x) => x.id === gameId);
+      if (!g) return;
+      setEditGameId(gameId);
+      // deep-ish clone to avoid editing history object directly
+      setEditGame(JSON.parse(JSON.stringify(g)));
+      setUndoStack([]);
+      setTab("edit");
+      setTimeout(() => focusCell(0, 0), 0);
+    }
 
-  const context = tab === "edit" ? "edit" : "draft";
+    function saveEdits() {
+      if (!editGame) return;
+      const normalizedPlayers = ensureUniqueNames(editGame.players || []);
+      const updated = { ...editGame, players: normalizedPlayers };
 
-  return (
+      const t = computeTotals(updated.players, updated.rounds);
+      const w = winnerIds(updated.players, t);
+      const finalGame = { ...updated, totals: t, winnerIds: w, editedAt: new Date().toISOString() };
+
+      setHistory((prev) => prev.map((g) => (g.id === editGameId ? finalGame : g)));
+      setTab("history");
+      setEditGameId("");
+      setEditGame(null);
+      setUndoStack([]);
+    }
+    function editPlayersPrompt() {
+      const game = tab === "edit" ? editGame : draft;
+      if (!game?.players?.length) return;
+
+      const choices = game.players
+        .map((p, idx) => `${idx + 1}. ${p.name}`)
+        .join("\n");
+
+      const rawChoice = prompt(`Which player do you want to rename?\n\n${choices}`);
+      if (rawChoice == null) return;
+
+      const choice = Number(rawChoice);
+      if (!Number.isInteger(choice) || choice < 1 || choice > game.players.length) return;
+
+      const player = game.players[choice - 1];
+      const nextName = prompt("New player name", player.name);
+      if (nextName == null) return;
+
+      setPlayerName(player.id, nextName, context);
+  } 
+    function deleteGame(gameId) {
+      if (!confirm("Delete this saved game? This cannot be undone.")) return;
+      setHistory((prev) => prev.filter((g) => g.id !== gameId));
+      if (editGameId === gameId) {
+        setEditGameId("");
+        setEditGame(null);
+        setTab("history");
+      }
+    }
+
+    const filteredHistory = useMemo(() => {
+      const q = search.trim().toLowerCase();
+      const tf = tagFilter.trim();
+      return history.filter((g) => {
+        if (tf && !(g.tags || []).includes(tf)) return false;
+        if (!q) return true;
+        const blob = [
+          g.name,
+          g.location,
+          g.notes,
+          ...(g.tags || []),
+          ...(g.players || []).map((p) => p.name),
+        ]
+          .filter(Boolean)
+          .join(" | ")
+          .toLowerCase();
+        return blob.includes(q);
+      });
+    }, [history, search, tagFilter]);
+
+    const context = tab === "edit" ? "edit" : "draft";
+    const current = tab === "edit" ? editGame : draft;
+    
+    const totals = useMemo(() => {
+     if (!current) return {};
+      return computeTotals(current.players || [], current.rounds || []);
+}, [current]);
+
+    const currentRoundIndex =
+      current?.rounds?.findIndex((round) =>
+      current.players.some((p) => round.scores?.[p.id] == null)
+  ) ?? 0;
+
+const roundsWon = useMemo(() => {
+  if (!current) return {};
+  return computeRoundsWon(current.players || [], current.rounds || []);
+}, [current]);
+
+const winners = useMemo(() => {
+  if (!current) return [];
+  return winnerIds(current.players || [], totals, current.rounds || []);
+}, [current, totals]);
+
+    return (
     <>
       <style>{styles}</style>
       <div className="container">
@@ -951,6 +965,9 @@ export default function App() {
                     <button className="btn" onClick={addLatePlayer}>
                       + Add Player
                     </button>
+                    <button className="btn" onClick={editPlayersPrompt}>
+                      Edit Players
+                    </button>
                     <button className="btn primary" onClick={finishAndSave}>
                       Finish & Save
                     </button>
@@ -998,7 +1015,7 @@ export default function App() {
                     <th className="th round">Round</th>
                     {current.players.map((p) => (
                       <th className="th" key={p.id}>
-                        {p.name}
+                        <div>{p.name}</div>
                         {winners.includes(p.id) ? <span className="badge">leader</span> : null}
                       </th>
                     ))}
@@ -1019,7 +1036,10 @@ export default function App() {
                         }}
                       >
 
-                      <td className="td round">{"R " + label}</td>
+                      <td className="td round">
+                        {"R " + label}
+                        <div className="small">Dealer: {getDealerName(current.players, rIdx)}</div>
+                      </td>
                       {current.players.map((p, pIdx) => {
                          const val = current.rounds?.[rIdx]?.scores?.[p.id];
                           const wentOut = (current.rounds?.[rIdx]?.wentOutId || "") === p.id;
@@ -1276,7 +1296,4 @@ function TagAdder({ onAdd }) {
       </button>
     </div>
   );
-<p style={{fontSize: "12px", opacity: 0.6, textAlign: "center"}}>
-Scores are saved locally on your device. No accounts, no tracking.
-</p>
 }
