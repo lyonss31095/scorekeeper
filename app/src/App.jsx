@@ -147,23 +147,7 @@ const styles = `
   --winner: rgba(109, 40, 217, 0.16);
   --wentout: rgba(50, 205, 50, 0.18); /* subtle green */
 }
-
-@media (prefers-color-scheme: dark){
-  :root{
-    --rowAlt: #171325;
-    --bg: #0b0b0c;
-    --panel: #121214;
-    --text: #f5f5f5;
-    --muted: #b7b7b7;
-    --border: #2a2a2e;
-    --chip: #1b1b1f;
-    --chipText: #f5f5f5;
-    --primary: #8B5CF6;
-    --focus: rgba(255,255,255,0.18);
-    --winner: rgba(139, 92, 246, 0.22);
-    --wentout: rgba(50, 205, 50, 0.14);
-  }
-
+  
 *{ box-sizing:border-box; }
 body{
   margin:0;
