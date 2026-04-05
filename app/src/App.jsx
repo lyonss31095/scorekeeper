@@ -399,11 +399,8 @@ export default function App() {
   const [editGame, setEditGame] = useState(null);
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState("");
-
-  // refs for score inputs (for Enter navigation)
+    // refs for score inputs (for Enter navigation)
   const inputRefs = useRef(new Map()); // key: `${r}_${c}` -> element
-
-
 
   function setEditField(field, value) {
     setEditGame((prev) => {
@@ -412,34 +409,52 @@ export default function App() {
     });
   }
 
-  function addLatePlayer() {
-  setDraft((prev) => {
-    const newPlayerId = uid();
-    const newPlayerNumber = prev.players.length + 1;
-
-    const nextPlayers = [
-      ...prev.players,
-      { id: newPlayerId, name: `Player ${newPlayerNumber}`, joinRound: currentRoundIndex },
-    ];
-
-    const nextRounds = prev.rounds.map((round, idx) => {
-      const scores = { ...(round.scores || {}) };
-
-      if (idx < currentRoundIndex) {
-        scores[newPlayerId] = 0;
-      }
-
-      return { ...round, scores };
+  function setDraftField(field, value) {
+    setDraft((prev) => {
+      const next = { ...prev, [field]: value };
+      return next;
     });
+  }
 
-    return {
-      ...prev,
-      players: nextPlayers,
-      rounds: nextRounds,
-    };
-  });
-}
+  function addPlayer(to = "draft") {
+    const fn = to === "edit" ? setEditGame : setDraft;
+    fn((prev) => {
+      const nextPlayerNumber = (prev.players?.length || 0) + 1;
+      const nextPlayers = [
+        ...(prev.players || []),
+        { id: uid(), name: `Player ${nextPlayerNumber}`, joinRound: 0 },
+      ];
+      return { ...prev, players: nextPlayers };
+    });
+  }
 
+  function addLatePlayer() {
+    setDraft((prev) => {
+      const newPlayerId = uid();
+      const newPlayerNumber = prev.players.length + 1;
+
+      const nextPlayers = [
+        ...prev.players,
+        { id: newPlayerId, name: `Player ${newPlayerNumber}`, joinRound: currentRoundIndex },
+      ];
+
+      const nextRounds = prev.rounds.map((round, idx) => {
+        const scores = { ...(round.scores || {}) };
+
+        if (idx < currentRoundIndex) {
+          scores[newPlayerId] = 0;
+        }
+
+        return { ...round, scores };
+      });
+
+      return {
+        ...prev,
+        players: nextPlayers,
+        rounds: nextRounds,
+      };
+    });
+  }
 
   function removePlayer(playerId, to = "draft") {
     const fn = to === "edit" ? setEditGame : setDraft;
