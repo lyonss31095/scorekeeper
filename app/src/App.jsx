@@ -150,6 +150,7 @@ const styles = `
 
 @media (prefers-color-scheme: dark){
   :root{
+    --rowAlt: #171325;
     --bg: #0b0b0c;
     --panel: #121214;
     --text: #f5f5f5;
@@ -157,12 +158,11 @@ const styles = `
     --border: #2a2a2e;
     --chip: #1b1b1f;
     --chipText: #f5f5f5;
-    --primary: #f5f5f5;
+    --primary: #8B5CF6;
     --focus: rgba(255,255,255,0.18);
-    --winner: rgba(255, 215, 0, 0.18);
+    --winner: rgba(139, 92, 246, 0.22);
     --wentout: rgba(50, 205, 50, 0.14);
   }
-}
 
 *{ box-sizing:border-box; }
 body{
