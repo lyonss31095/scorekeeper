@@ -83,18 +83,16 @@ function getDealerName(players, roundIndex) {
   const dealerIndex = roundIndex % eligible.length;
   return eligible[dealerIndex]?.name || "";
 }
-function winnerIds(players, totals, rounds = []) {
+function winnerIds(players, totals) {
   if (!players.length) return [];
-  const currentRoundIndex = rounds.findIndex((round) =>
-    players.some((p) => round.scores?.[p.id] == null)
-  );
-  const effectiveCurrentRoundIndex =
-    currentRoundIndex === -1 ? rounds.length : currentRoundIndex;
+
   const eligiblePlayers = players.filter((p) => {
     const joinRound = typeof p.joinRound === "number" ? p.joinRound : 0;
-    return joinRound < effectiveCurrentRoundIndex;
+    return joinRound === 0;
   });
+
   if (!eligiblePlayers.length) return [];
+
   let best = Infinity;
   for (const p of eligiblePlayers) best = Math.min(best, totals[p.id] ?? 0);
 
@@ -134,7 +132,7 @@ function ensureUniqueNames(players) {
 
 const styles = `
 :root{
-  --rowAlt: #F3F0FA;
+  --rowAlt: #F1ECFA;
   --bg: #F6F4FB;
   --panel: #FCFBFF;
   --text: #0a0a0a;
@@ -147,7 +145,6 @@ const styles = `
   --winner: rgba(109, 40, 217, 0.16);
   --wentout: rgba(50, 205, 50, 0.18); /* subtle green */
 }
-  
 *{ box-sizing:border-box; }
 body{
   margin:0;
@@ -330,6 +327,31 @@ a{ color: inherit; }
   padding: 2px 6px;
   display:inline-block;
 }
+.dealerPill{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(109, 40, 217, 0.08);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+.currentPill{
+  display: inline-flex;
+  align-items: center;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(109, 40, 217, 0.10);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
 .historyList{ display:flex; flex-direction:column; gap:10px; }
 .historyItem{
   text-align:left;
@@ -385,6 +407,7 @@ export default function App() {
   const [tagFilter, setTagFilter] = useState("");
     // refs for score inputs (for Enter navigation)
   const inputRefs = useRef(new Map()); // key: `${r}_${c}` -> element
+  const rowRefs = useRef(new Map()); // key: round index -> row element
 
   function setEditField(field, value) {
     setEditGame((prev) => {
@@ -413,32 +436,42 @@ export default function App() {
   }
 
   function addLatePlayer() {
-    setDraft((prev) => {
-      const newPlayerId = uid();
-      const newPlayerNumber = prev.players.length + 1;
+  const newPlayerNumber = draft.players.length + 1;
+  const defaultName = `Player ${newPlayerNumber}`;
+  const chosenName = prompt("Name for the new player", defaultName);
+  if (chosenName == null) return;
 
-      const nextPlayers = [
-        ...prev.players,
-        { id: newPlayerId, name: `Player ${newPlayerNumber}`, joinRound: currentRoundIndex },
-      ];
+  const trimmedName = chosenName.trim() || defaultName;
 
-      const nextRounds = prev.rounds.map((round, idx) => {
-        const scores = { ...(round.scores || {}) };
+  setDraft((prev) => {
+    const newPlayerId = uid();
 
-        if (idx < currentRoundIndex) {
-          scores[newPlayerId] = 0;
-        }
+    const nextPlayers = [
+      ...prev.players,
+      { id: newPlayerId, name: trimmedName, joinRound: currentRoundIndex },
+    ];
 
-        return { ...round, scores };
-      });
+    const nextRounds = prev.rounds.map((round, idx) => {
+      const scores = { ...(round.scores || {}) };
 
-      return {
-        ...prev,
-        players: nextPlayers,
-        rounds: nextRounds,
-      };
+      if (idx < currentRoundIndex) {
+        scores[newPlayerId] = 0;
+      }
+
+      return { ...round, scores };
     });
-  }
+
+    return {
+      ...prev,
+      players: nextPlayers,
+      rounds: nextRounds,
+    };
+  });
+
+  setTimeout(() => {
+    focusCell(currentRoundIndex, draft.players.length);
+  }, 0);
+}
 
   function removePlayer(playerId, to = "draft") {
     const fn = to === "edit" ? setEditGame : setDraft;
@@ -726,26 +759,19 @@ export default function App() {
       setEditGame(null);
       setUndoStack([]);
     }
-    function editPlayersPrompt() {
-      const game = tab === "edit" ? editGame : draft;
-      if (!game?.players?.length) return;
+    function editPlayerName(playerId) {
+  const game = tab === "edit" ? editGame : draft;
+  const player = game?.players?.find((p) => p.id === playerId);
+  if (!player) return;
 
-      const choices = game.players
-        .map((p, idx) => `${idx + 1}. ${p.name}`)
-        .join("\n");
+  const nextName = prompt("New player name", player.name);
+  if (nextName == null) return;
 
-      const rawChoice = prompt(`Which player do you want to rename?\n\n${choices}`);
-      if (rawChoice == null) return;
+  const trimmedName = nextName.trim();
+  if (!trimmedName) return;
 
-      const choice = Number(rawChoice);
-      if (!Number.isInteger(choice) || choice < 1 || choice > game.players.length) return;
-
-      const player = game.players[choice - 1];
-      const nextName = prompt("New player name", player.name);
-      if (nextName == null) return;
-
-      setPlayerName(player.id, nextName, context);
-  } 
+  setPlayerName(player.id, trimmedName, context);
+}
     function deleteGame(gameId) {
       if (!confirm("Delete this saved game? This cannot be undone.")) return;
       setHistory((prev) => prev.filter((g) => g.id !== gameId));
@@ -798,6 +824,18 @@ const winners = useMemo(() => {
   if (!current) return [];
   return winnerIds(current.players || [], totals, current.rounds || []);
 }, [current, totals]);
+
+useEffect(() => {
+  if (tab !== "score") return;
+  const rowEl = rowRefs.current.get(currentRoundIndex);
+  if (!rowEl) return;
+
+  rowEl.scrollIntoView({
+    behavior: "smooth",
+    block: "nearest",
+    inline: "nearest",
+  });
+}, [currentRoundIndex, tab]);
 
     return (
     <>
@@ -940,6 +978,9 @@ const winners = useMemo(() => {
                 Rounds: <b>11</b> (3 → 13). Winner: <b>lowest total</b>. Mark ⭐ for who went out first
                 each round (drives “Rounds Won”).
               </div>
+              <div className="small" style={{ marginTop: 8 }}>
+                Tip: Add players in seating/dealer order. The first player deals first, then dealer rotates across the row.
+              </div>
             </div>
           </div>
         )}
@@ -964,10 +1005,7 @@ const winners = useMemo(() => {
                     <button className="btn" onClick={addLatePlayer}>
                       + Add Player
                     </button>
-                    <button className="btn" onClick={editPlayersPrompt}>
-                      Edit Players
-                    </button>
-                    <button className="btn primary" onClick={finishAndSave}>
+                                        <button className="btn primary" onClick={finishAndSave}>
                       Finish & Save
                     </button>
                   </>
@@ -1001,7 +1039,7 @@ const winners = useMemo(() => {
                 </b>
               </div>
               <div className="small">
-                Enter moves right → end of row goes down. ⭐ marks “went out first.”
+                Enter moves right → end of row goes down. ⭐ marks “went out first.” Tap a player name above to rename them.
               </div>
             </div>
 
@@ -1014,7 +1052,24 @@ const winners = useMemo(() => {
                     <th className="th round">Round</th>
                     {current.players.map((p) => (
                       <th className="th" key={p.id}>
-                        <div>{p.name}</div>
+                        <button
+                          type="button"
+                          onClick={() => editPlayerName(p.id)}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            padding: 0,
+                            margin: 0,
+                            font: "inherit",
+                            color: "inherit",
+                            cursor: "pointer",
+                            textAlign: "left",
+                            fontWeight: 700,
+                          }}
+                          title="Rename player"
+                        >
+                          {p.name}
+                        </button>
                         {winners.includes(p.id) ? <span className="badge">leader</span> : null}
                       </th>
                     ))}
@@ -1025,19 +1080,25 @@ const winners = useMemo(() => {
                   {current.roundLabels.map((label, rIdx) => (
                       <tr 
                         key={label}
+                        ref={(el) => {
+                          if (el) rowRefs.current.set(rIdx, el);
+                          else rowRefs.current.delete(rIdx);
+                        }}
                         style={{
-                          background:
-                            rIdx === currentRoundIndex
-                              ? "#E9DDFB"
-                              : rIdx % 2 === 1
-                              ? "var(--rowAlt)"
-                              : "transparent",
+                          background: rIdx % 2 === 1 ? "var(--rowAlt)" : "transparent",
                         }}
                       >
 
-                      <td className="td round">
-                        {"R " + label}
-                        <div className="small">Dealer: {getDealerName(current.players, rIdx)}</div>
+                      <td
+                        className="td round"
+                        style={{
+                          background: rIdx % 2 === 1 ? "var(--rowAlt)" : "var(--panel)",
+                          borderLeft: rIdx === currentRoundIndex ? "4px solid var(--primary)" : "4px solid transparent",
+                        }}
+                      >
+                        <div>{"R " + label}</div>
+                        <div className="dealerPill">Dealer: {getDealerName(current.players, rIdx)}</div>
+                        {rIdx === currentRoundIndex ? <div className="currentPill">Current</div> : null}
                       </td>
                       {current.players.map((p, pIdx) => {
                          const val = current.rounds?.[rIdx]?.scores?.[p.id];
