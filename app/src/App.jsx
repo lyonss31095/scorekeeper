@@ -1,19 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-/**
- * Scorekeeper MVP (5 Crowns-first)
- * - New Game setup
- * - Scoring: rounds as rows, players as columns, totals auto-summed
- * - "Went out first" marker per round (⭐) -> "Rounds Won" row
- * - Autosave on every change (Google Docs style)
- * - Undo last change
- * - History + Edit saved game
- *
- * Storage:
- * - Draft (in-progress game): localStorage key scorekeeper_draft_v1
- * - History (saved games): localStorage key scorekeeper_history_v1
- */
-
 const LS_DRAFT = "scorekeeper_draft_v1";
 const LS_HISTORY = "scorekeeper_history_v1";
 
@@ -33,19 +19,20 @@ function uid() {
 }
 
 function clampScore(n) {
-  // Prevent accidental huge values; you can adjust later
   const MAX = 200;
   if (!Number.isFinite(n)) return 0;
   return Math.max(0, Math.min(MAX, n));
 }
 
 function roundsFor5Crowns() {
-  return [ 
-    "3","4","5","6","7","8","9","10",
-    "Jacks","Queens","Kings"
-  ];
+  return ["3", "4", "5", "6", "7", "8", "9", "10", "Jacks", "Queens", "Kings"];
 }
 
+function getRoundMeta(label, roundIndex) {
+  const cardsDealt = roundIndex + 3;
+  const wild = label === "Jacks" ? "Jack" : label === "Queens" ? "Queen" : label === "Kings" ? "King" : label;
+  return { cardsDealt, wild };
+}
 
 function computeTotals(players, rounds) {
   const totals = {};
@@ -67,30 +54,29 @@ function computeTotals(players, rounds) {
 function computeRoundsWon(players, rounds) {
   const wins = {};
   for (const p of players) wins[p.id] = 0;
-
   for (const r of rounds) {
     if (r.wentOutId && wins[r.wentOutId] !== undefined) wins[r.wentOutId] += 1;
   }
   return wins;
 }
+
 function getDealerName(players, roundIndex) {
   if (!players || players.length === 0) return "";
-  const eligible = players.filter((p) => {
+  const eligiblePlayers = players.filter((p) => {
     const joinRound = typeof p.joinRound === "number" ? p.joinRound : 0;
     return joinRound <= roundIndex;
   });
-  if (eligible.length === 0) return "";
-  const dealerIndex = roundIndex % eligible.length;
-  return eligible[dealerIndex]?.name || "";
+  if (eligiblePlayers.length === 0) return "";
+  const dealer = eligiblePlayers[roundIndex % eligiblePlayers.length];
+  return dealer?.name || "";
 }
+
 function winnerIds(players, totals) {
   if (!players.length) return [];
-
   const eligiblePlayers = players.filter((p) => {
     const joinRound = typeof p.joinRound === "number" ? p.joinRound : 0;
     return joinRound === 0;
   });
-
   if (!eligiblePlayers.length) return [];
 
   let best = Infinity;
@@ -143,7 +129,6 @@ const styles = `
   --primary: #6D28D9;
   --focus: rgba(0,0,0,0.12);
   --winner: rgba(109, 40, 217, 0.16);
-  --wentout: rgba(50, 205, 50, 0.18); /* subtle green */
 }
 *{ box-sizing:border-box; }
 body{
@@ -193,7 +178,7 @@ a{ color: inherit; }
   .grid{ grid-template-columns: 360px 1fr; }
 }
 .label{ font-size: 12px; font-weight: 600; margin-bottom: 6px; }
-.input, .textarea, .select{
+.input, .textarea{
   width: 100%;
   border: 1px solid var(--border);
   background: transparent;
@@ -366,21 +351,52 @@ a{ color: inherit; }
 .historyItem.active{ border-color: var(--primary); }
 .historyTitle{ font-weight: 800; }
 .historyMeta{ margin-top: 4px; font-size: 12px; color: var(--muted); }
+.heroCard{
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(109,40,217,0.08), rgba(109,40,217,0.02));
+  margin-bottom: 12px;
+}
+.heroTitle{
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0 0 6px 0;
+}
+.heroSub{
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.heroChips{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.heroChip{
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.7);
+  border:1px solid var(--border);
+  font-size:12px;
+  font-weight:600;
+}
+@media (max-width: 760px){
+  .container{ padding: 12px; }
+  .panel{ padding: 12px; }
+  .table{ min-width: 680px; }
+  .scoreInput{ width: 78px; }
+}
 `;
 
-// Change record for Undo
-// type: "score" | "wentout" | "meta" | "player"
 function pushUndo(stack, entry) {
   const next = [entry, ...stack];
-  // keep small
   return next.slice(0, 50);
 }
 
 export default function App() {
-  const [tab, setTab] = useState("new"); // new | score | history | edit
+  const [tab, setTab] = useState("new");
   const [history, setHistory] = useState([]);
-
-  // Draft / current game
   const [draft, setDraft] = useState(() => ({
     id: uid(),
     gameType: "5crowns",
@@ -393,34 +409,47 @@ export default function App() {
       { id: uid(), name: "Player 1", joinRound: 0 },
       { id: uid(), name: "Player 2", joinRound: 0 },
     ],
-    roundLabels: roundsFor5Crowns(), // [3..13]
+    roundLabels: roundsFor5Crowns(),
     rounds: roundsFor5Crowns().map(() => ({ scores: {}, wentOutId: "" })),
   }));
-
-  // Undo stack for the *current editing context* (draft or edit)
   const [undoStack, setUndoStack] = useState([]);
-
-  // Editing saved game
   const [editGameId, setEditGameId] = useState("");
   const [editGame, setEditGame] = useState(null);
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState("");
-    // refs for score inputs (for Enter navigation)
-  const inputRefs = useRef(new Map()); // key: `${r}_${c}` -> element
-  const rowRefs = useRef(new Map()); // key: round index -> row element
+  const inputRefs = useRef(new Map());
+  const rowRefs = useRef(new Map());
+  const importFileRef = useRef(null);
+
+  useEffect(() => {
+    const h = safeParse(localStorage.getItem(LS_HISTORY) || "[]", []);
+    setHistory(Array.isArray(h) ? h : []);
+
+    const d = safeParse(localStorage.getItem(LS_DRAFT) || "null", null);
+    if (d && d.players && d.rounds && d.roundLabels) {
+      setDraft(d);
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(LS_HISTORY, JSON.stringify(history));
+  }, [history]);
+
+  useEffect(() => {
+    if (tab === "new" || tab === "score") {
+      localStorage.setItem(LS_DRAFT, JSON.stringify(draft));
+    }
+  }, [draft, tab]);
+
+  const context = tab === "edit" ? "edit" : "draft";
+  const current = tab === "edit" ? editGame : draft;
 
   function setEditField(field, value) {
-    setEditGame((prev) => {
-      const next = { ...prev, [field]: value };
-      return next;
-    });
+    setEditGame((prev) => ({ ...prev, [field]: value }));
   }
 
   function setDraftField(field, value) {
-    setDraft((prev) => {
-      const next = { ...prev, [field]: value };
-      return next;
-    });
+    setDraft((prev) => ({ ...prev, [field]: value }));
   }
 
   function addPlayer(to = "draft") {
@@ -435,43 +464,41 @@ export default function App() {
     });
   }
 
+  const totals = useMemo(() => {
+    if (!current) return {};
+    return computeTotals(current.players || [], current.rounds || []);
+  }, [current]);
+
+  const currentRoundIndex = current?.rounds?.findIndex((round) =>
+    current.players.some((p) => round.scores?.[p.id] == null)
+  ) ?? 0;
+
   function addLatePlayer() {
-  const newPlayerNumber = draft.players.length + 1;
-  const defaultName = `Player ${newPlayerNumber}`;
-  const chosenName = prompt("Name for the new player", defaultName);
-  if (chosenName == null) return;
+    const newPlayerNumber = draft.players.length + 1;
+    const defaultName = `Player ${newPlayerNumber}`;
+    const chosenName = prompt("Name for the new player", defaultName);
+    if (chosenName == null) return;
 
-  const trimmedName = chosenName.trim() || defaultName;
+    const trimmedName = chosenName.trim() || defaultName;
 
-  setDraft((prev) => {
-    const newPlayerId = uid();
-
-    const nextPlayers = [
-      ...prev.players,
-      { id: newPlayerId, name: trimmedName, joinRound: currentRoundIndex },
-    ];
-
-    const nextRounds = prev.rounds.map((round, idx) => {
-      const scores = { ...(round.scores || {}) };
-
-      if (idx < currentRoundIndex) {
-        scores[newPlayerId] = 0;
-      }
-
-      return { ...round, scores };
+    setDraft((prev) => {
+      const newPlayerId = uid();
+      const nextPlayers = [
+        ...prev.players,
+        { id: newPlayerId, name: trimmedName, joinRound: currentRoundIndex },
+      ];
+      const nextRounds = prev.rounds.map((round, idx) => {
+        const scores = { ...(round.scores || {}) };
+        if (idx < currentRoundIndex) scores[newPlayerId] = 0;
+        return { ...round, scores };
+      });
+      return { ...prev, players: nextPlayers, rounds: nextRounds };
     });
 
-    return {
-      ...prev,
-      players: nextPlayers,
-      rounds: nextRounds,
-    };
-  });
-
-  setTimeout(() => {
-    focusCell(currentRoundIndex, draft.players.length);
-  }, 0);
-}
+    setTimeout(() => {
+      focusCell(currentRoundIndex, draft.players.length);
+    }, 0);
+  }
 
   function removePlayer(playerId, to = "draft") {
     const fn = to === "edit" ? setEditGame : setDraft;
@@ -495,10 +522,20 @@ export default function App() {
     });
   }
 
+  function editPlayerName(playerId) {
+    const game = tab === "edit" ? editGame : draft;
+    const player = game?.players?.find((p) => p.id === playerId);
+    if (!player) return;
+    const nextName = prompt("New player name", player.name);
+    if (nextName == null) return;
+    const trimmedName = nextName.trim();
+    if (!trimmedName) return;
+    setPlayerName(player.id, trimmedName, context);
+  }
+
   function toggleTag(tag, to = "draft") {
     tag = normalizeTag(tag);
     if (!tag) return;
-
     const fn = to === "edit" ? setEditGame : setDraft;
     fn((prev) => {
       const set = new Set(prev.tags || []);
@@ -522,8 +559,6 @@ export default function App() {
   function onScoreChange(rIdx, pIdx, rawValue, to = "draft") {
     const game = to === "edit" ? editGame : draft;
     const playerId = game.players[pIdx].id;
-
-    // Allow blank -> remove key
     const trimmed = rawValue.trim();
     let nextVal;
     if (trimmed === "") nextVal = null;
@@ -545,299 +580,317 @@ export default function App() {
       })
     );
 
-      const fn = to === "edit" ? setEditGame : setDraft;
+    const fn = to === "edit" ? setEditGame : setDraft;
+    fn((prev) => {
+      const rounds = prev.rounds.map((r, i) => {
+        if (i !== rIdx) return r;
+        const scores = { ...(r.scores || {}) };
+        if (nextVal === null) delete scores[playerId];
+        else scores[playerId] = nextVal;
+        return { ...r, scores };
+      });
+      return { ...prev, rounds };
+    });
+  }
+
+  function toggleWentOut(rIdx, pIdx, to = "draft") {
+    const game = to === "edit" ? editGame : draft;
+    const playerId = game.players[pIdx].id;
+    const prevWentOutId = game.rounds[rIdx].wentOutId || "";
+    setUndoStack((s) =>
+      pushUndo(s, {
+        type: "wentout",
+        to,
+        rIdx,
+        prevWentOutId,
+      })
+    );
+
+    const fn = to === "edit" ? setEditGame : setDraft;
+    fn((prev) => {
+      const rounds = prev.rounds.map((r, i) => {
+        if (i !== rIdx) return r;
+        const next = r.wentOutId === playerId ? "" : playerId;
+        return { ...r, wentOutId: next };
+      });
+      return { ...prev, rounds };
+    });
+  }
+
+  function undo() {
+    const [top, ...rest] = undoStack;
+    if (!top) return;
+    setUndoStack(rest);
+    const fn = top.to === "edit" ? setEditGame : setDraft;
+
+    if (top.type === "score") {
       fn((prev) => {
+        const playerId = top.playerId;
         const rounds = prev.rounds.map((r, i) => {
-          if (i !== rIdx) return r;
+          if (i !== top.rIdx) return r;
           const scores = { ...(r.scores || {}) };
-          if (nextVal === null) delete scores[playerId];
-          else scores[playerId] = nextVal;
+          if (top.prevVal === null || top.prevVal === undefined) delete scores[playerId];
+          else scores[playerId] = top.prevVal;
           return { ...r, scores };
         });
         return { ...prev, rounds };
       });
+      focusCell(top.rIdx, top.pIdx);
+      return;
     }
 
-    function toggleWentOut(rIdx, pIdx, to = "draft") {
-      const game = to === "edit" ? editGame : draft;
-      const playerId = game.players[pIdx].id;
-      const prevWentOutId = game.rounds[rIdx].wentOutId || "";
-
-      setUndoStack((s) =>
-        pushUndo(s, {
-          type: "wentout",
-          to,
-          rIdx,
-          prevWentOutId,
-        })
-      );
-
-      const fn = to === "edit" ? setEditGame : setDraft;
+    if (top.type === "wentout") {
       fn((prev) => {
         const rounds = prev.rounds.map((r, i) => {
-          if (i !== rIdx) return r;
-          const next = r.wentOutId === playerId ? "" : playerId;
-          return { ...r, wentOutId: next };
+          if (i !== top.rIdx) return r;
+          return { ...r, wentOutId: top.prevWentOutId || "" };
         });
         return { ...prev, rounds };
       });
     }
+  }
 
-    function undo() {
-      const [top, ...rest] = undoStack;
-      if (!top) return;
+  function focusCell(rIdx, pIdx) {
+    const key = `${rIdx}_${pIdx}`;
+    const el = inputRefs.current.get(key);
+    if (el && typeof el.focus === "function") el.focus();
+  }
 
-      setUndoStack(rest);
-
-      const fn = top.to === "edit" ? setEditGame : setDraft;
-
-      if (top.type === "score") {
-        fn((prev) => {
-          const playerId = top.playerId;
-          const rounds = prev.rounds.map((r, i) => {
-            if (i !== top.rIdx) return r;
-            const scores = { ...(r.scores || {}) };
-            if (top.prevVal === null || top.prevVal === undefined) delete scores[playerId];
-            else scores[playerId] = top.prevVal;
-            return { ...r, scores };
-          });
-          return { ...prev, rounds };
-        });
-        // restore focus
-        focusCell(top.rIdx, top.pIdx);
-        return;
+  function onScoreKeyDown(e, rIdx, pIdx, to = "draft") {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const game = to === "edit" ? editGame : draft;
+      const lastCol = (game.players?.length ?? 1) - 1;
+      const lastRow = (game.rounds?.length ?? 1) - 1;
+      let nextR = rIdx;
+      let nextC = pIdx + 1;
+      if (pIdx >= lastCol) {
+        nextC = 0;
+        nextR = Math.min(lastRow, rIdx + 1);
       }
+      focusCell(nextR, nextC);
+    }
+  }
 
-      if (top.type === "wentout") {
-        fn((prev) => {
-          const rounds = prev.rounds.map((r, i) => {
-            if (i !== top.rIdx) return r;
-            return { ...r, wentOutId: top.prevWentOutId || "" };
-          });
-          return { ...prev, rounds };
-        });
-        return;
-      }
+  function validateForStart(game) {
+    if (!game.players || game.players.length < 2) return "Add at least 2 players.";
+    const cleaned = ensureUniqueNames(game.players);
+    if (cleaned.some((p) => !(p.name || "").trim())) return "Player names can’t be blank.";
+    return "";
+  }
+
+  function startGame() {
+    const err = validateForStart(draft);
+    if (err) {
+      alert(err);
+      return;
+    }
+    setDraft((prev) => ({ ...prev, players: ensureUniqueNames(prev.players) }));
+    setTab("score");
+    setTimeout(() => focusCell(0, 0), 0);
+  }
+
+  function createFreshDraft() {
+    return {
+      id: uid(),
+      gameType: "5crowns",
+      name: "",
+      createdAt: new Date().toISOString(),
+      location: "",
+      notes: "",
+      tags: [],
+      players: [
+        { id: uid(), name: "Player 1", joinRound: 0 },
+        { id: uid(), name: "Player 2", joinRound: 0 },
+      ],
+      roundLabels: roundsFor5Crowns(),
+      rounds: roundsFor5Crowns().map(() => ({ scores: {}, wentOutId: "" })),
+    };
+  }
+
+  function resetDraft() {
+    if (!confirm("Reset current game?")) return;
+    const fresh = createFreshDraft();
+    setDraft(fresh);
+    setUndoStack([]);
+    localStorage.setItem(LS_DRAFT, JSON.stringify(fresh));
+    setTab("new");
+  }
+
+  function finishAndSave() {
+    const err = validateForStart(draft);
+    if (err) {
+      alert(err);
+      return;
     }
 
-    function focusCell(rIdx, pIdx) {
-      const key = `${rIdx}_${pIdx}`;
-      const el = inputRefs.current.get(key);
-      if (el && typeof el.focus === "function") el.focus();
-    }
+    const normalizedPlayers = ensureUniqueNames(draft.players);
+    const normalizedDraft = { ...draft, players: normalizedPlayers };
+    const t = computeTotals(normalizedPlayers, normalizedDraft.rounds);
+    const w = winnerIds(normalizedPlayers, t);
+    const saved = {
+      ...normalizedDraft,
+      createdAt: normalizedDraft.createdAt || new Date().toISOString(),
+      savedAt: new Date().toISOString(),
+      totals: t,
+      winnerIds: w,
+    };
 
-    function onScoreKeyDown(e, rIdx, pIdx, to = "draft") {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        // move right; if last column, move to next row first column
-        const game = to === "edit" ? editGame : draft;
-        const lastCol = (game.players?.length ?? 1) - 1;
-        const lastRow = (game.rounds?.length ?? 1) - 1;
+    setHistory((prev) => [saved, ...prev]);
+    const fresh = createFreshDraft();
+    setDraft(fresh);
+    setUndoStack([]);
+    localStorage.setItem(LS_DRAFT, JSON.stringify(fresh));
+    setTab("history");
+  }
 
-        let nextR = rIdx;
-        let nextC = pIdx + 1;
+  function openForEdit(gameId) {
+    const g = history.find((x) => x.id === gameId);
+    if (!g) return;
+    setEditGameId(gameId);
+    setEditGame(JSON.parse(JSON.stringify(g)));
+    setUndoStack([]);
+    setTab("edit");
+    setTimeout(() => focusCell(0, 0), 0);
+  }
 
-        if (pIdx >= lastCol) {
-          nextC = 0;
-          nextR = Math.min(lastRow, rIdx + 1);
-        }
-        focusCell(nextR, nextC);
-      }
-    }
+  function saveEdits() {
+    if (!editGame) return;
+    const normalizedPlayers = ensureUniqueNames(editGame.players || []);
+    const updated = { ...editGame, players: normalizedPlayers };
+    const t = computeTotals(updated.players, updated.rounds);
+    const w = winnerIds(updated.players, t);
+    const finalGame = { ...updated, totals: t, winnerIds: w, editedAt: new Date().toISOString() };
+    setHistory((prev) => prev.map((g) => (g.id === editGameId ? finalGame : g)));
+    setTab("history");
+    setEditGameId("");
+    setEditGame(null);
+    setUndoStack([]);
+  }
 
-    function validateForStart(game) {
-      if (!game.players || game.players.length < 2) return "Add at least 2 players.";
-      const cleaned = ensureUniqueNames(game.players);
-      // ensure no blank
-      if (cleaned.some((p) => !(p.name || "").trim())) return "Player names can’t be blank.";
-      return "";
-    }
-
-    function startGame() {
-      const err = validateForStart(draft);
-      if (err) {
-        alert(err);
-        return;
-      }
-      // normalize names unique
-      setDraft((prev) => ({ ...prev, players: ensureUniqueNames(prev.players) }));
-      setTab("score");
-      // focus first cell
-      setTimeout(() => focusCell(0, 0), 0);
-    }
-
-    function resetDraft() {
-      if (!confirm("Reset current game?")) return;
-      const fresh = {
-        id: uid(),
-        gameType: "5crowns",
-        name: "",
-        createdAt: new Date().toISOString(),
-        location: "",
-        notes: "",
-        tags: [],
-        players: [
-          { id: uid(), name: "Player 1", joinRound: 0 },
-          { id: uid(), name: "Player 2", joinRound: 0 },
-        ],
-        roundLabels: roundsFor5Crowns(),
-        rounds: roundsFor5Crowns().map(() => ({ scores: {}, wentOutId: "" })),
-      };
-      setDraft(fresh);
-      setUndoStack([]);
-      localStorage.setItem(LS_DRAFT, JSON.stringify(fresh));
-      setTab("new");
-    }
-
-    function finishAndSave() {
-      const err = validateForStart(draft);
-      if (err) {
-        alert(err);
-        return;
-      }
-
-      const normalizedPlayers = ensureUniqueNames(draft.players);
-      const normalizedDraft = { ...draft, players: normalizedPlayers };
-
-      const t = computeTotals(normalizedPlayers, normalizedDraft.rounds);
-      const w = winnerIds(normalizedPlayers, t);
-
-      const saved = {
-        ...normalizedDraft,
-        createdAt: normalizedDraft.createdAt || new Date().toISOString(),
-        savedAt: new Date().toISOString(),
-        totals: t,
-        winnerIds: w,
-      };
-
-      setHistory((prev) => [saved, ...prev]);
-      // reset draft after saving
-      const fresh = {
-        id: uid(),
-        gameType: "5crowns",
-        name: "",
-        createdAt: new Date().toISOString(),
-        location: "",
-        notes: "",
-        tags: [],
-        players: [
-          { id: uid(), name: "Player 1", joinRound: 0 },
-          { id: uid(), name: "Player 2", joinRound: 0 },
-        ],
-        roundLabels: roundsFor5Crowns(),
-        rounds: roundsFor5Crowns().map(() => ({ scores: {}, wentOutId: "" })),
-      };
-      setDraft(fresh);
-      setUndoStack([]);
-      localStorage.setItem(LS_DRAFT, JSON.stringify(fresh));
-      setTab("history");
-    }
-
-    function openForEdit(gameId) {
-      const g = history.find((x) => x.id === gameId);
-      if (!g) return;
-      setEditGameId(gameId);
-      // deep-ish clone to avoid editing history object directly
-      setEditGame(JSON.parse(JSON.stringify(g)));
-      setUndoStack([]);
-      setTab("edit");
-      setTimeout(() => focusCell(0, 0), 0);
-    }
-
-    function saveEdits() {
-      if (!editGame) return;
-      const normalizedPlayers = ensureUniqueNames(editGame.players || []);
-      const updated = { ...editGame, players: normalizedPlayers };
-
-      const t = computeTotals(updated.players, updated.rounds);
-      const w = winnerIds(updated.players, t);
-      const finalGame = { ...updated, totals: t, winnerIds: w, editedAt: new Date().toISOString() };
-
-      setHistory((prev) => prev.map((g) => (g.id === editGameId ? finalGame : g)));
-      setTab("history");
+  function deleteGame(gameId) {
+    if (!confirm("Delete this saved game? This cannot be undone.")) return;
+    setHistory((prev) => prev.filter((g) => g.id !== gameId));
+    if (editGameId === gameId) {
       setEditGameId("");
       setEditGame(null);
-      setUndoStack([]);
+      setTab("history");
     }
-    function editPlayerName(playerId) {
-  const game = tab === "edit" ? editGame : draft;
-  const player = game?.players?.find((p) => p.id === playerId);
-  if (!player) return;
+  }
 
-  const nextName = prompt("New player name", player.name);
-  if (nextName == null) return;
+  function exportBackup() {
+    const backup = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      draft,
+      history,
+    };
 
-  const trimmedName = nextName.trim();
-  if (!trimmedName) return;
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `scorekeeper-backup-${stamp}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
-  setPlayerName(player.id, trimmedName, context);
-}
-    function deleteGame(gameId) {
-      if (!confirm("Delete this saved game? This cannot be undone.")) return;
-      setHistory((prev) => prev.filter((g) => g.id !== gameId));
-      if (editGameId === gameId) {
-        setEditGameId("");
-        setEditGame(null);
+  function importBackupFromFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      try {
+        const parsed = safeParse(String(reader.result || ""), null);
+        if (!parsed || typeof parsed !== "object") {
+          alert("That file does not look like a valid backup.");
+          return;
+        }
+
+        const nextHistory = Array.isArray(parsed.history) ? parsed.history : null;
+        const nextDraft = parsed.draft && typeof parsed.draft === "object" ? parsed.draft : null;
+
+        if (!nextHistory || !nextDraft || !nextDraft.players || !nextDraft.rounds || !nextDraft.roundLabels) {
+          alert("That backup file is missing required game data.");
+          return;
+        }
+
+        if (!confirm("Import this backup and replace the current saved games and current draft on this device?")) {
+          return;
+        }
+
+        setHistory(nextHistory);
+        setDraft(nextDraft);
         setTab("history");
+        setUndoStack([]);
+        localStorage.setItem(LS_HISTORY, JSON.stringify(nextHistory));
+        localStorage.setItem(LS_DRAFT, JSON.stringify(nextDraft));
+        alert("Backup imported.");
+      } catch {
+        alert("Could not read that backup file.");
       }
-    }
+    };
 
-    const filteredHistory = useMemo(() => {
-      const q = search.trim().toLowerCase();
-      const tf = tagFilter.trim();
-      return history.filter((g) => {
-        if (tf && !(g.tags || []).includes(tf)) return false;
-        if (!q) return true;
-        const blob = [
-          g.name,
-          g.location,
-          g.notes,
-          ...(g.tags || []),
-          ...(g.players || []).map((p) => p.name),
-        ]
-          .filter(Boolean)
-          .join(" | ")
-          .toLowerCase();
-        return blob.includes(q);
-      });
-    }, [history, search, tagFilter]);
+    reader.readAsText(file);
+  }
 
-    const context = tab === "edit" ? "edit" : "draft";
-    const current = tab === "edit" ? editGame : draft;
-    
-    const totals = useMemo(() => {
-     if (!current) return {};
-      return computeTotals(current.players || [], current.rounds || []);
-}, [current]);
+  const filteredHistory = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const tf = tagFilter.trim();
+    return history.filter((g) => {
+      if (tf && !(g.tags || []).includes(tf)) return false;
+      if (!q) return true;
+      const blob = [
+        g.name,
+        g.location,
+        g.notes,
+        ...(g.tags || []),
+        ...(g.players || []).map((p) => p.name),
+      ]
+        .filter(Boolean)
+        .join(" | ")
+        .toLowerCase();
+      return blob.includes(q);
+    });
+  }, [history, search, tagFilter]);
 
-    const currentRoundIndex =
-      current?.rounds?.findIndex((round) =>
-      current.players.some((p) => round.scores?.[p.id] == null)
-  ) ?? 0;
+  const roundsWon = useMemo(() => {
+    if (!current) return {};
+    return computeRoundsWon(current.players || [], current.rounds || []);
+  }, [current]);
 
-const roundsWon = useMemo(() => {
-  if (!current) return {};
-  return computeRoundsWon(current.players || [], current.rounds || []);
-}, [current]);
+  const winners = useMemo(() => {
+    if (!current) return [];
+    return winnerIds(current.players || [], totals);
+  }, [current, totals]);
 
-const winners = useMemo(() => {
-  if (!current) return [];
-  return winnerIds(current.players || [], totals, current.rounds || []);
-}, [current, totals]);
+  const hasDraftInProgress = useMemo(() => {
+    const hasScores = (draft.rounds || []).some((r) =>
+      Object.values(r.scores || {}).some((v) => typeof v === "number")
+    );
 
-useEffect(() => {
-  if (tab !== "score") return;
-  const rowEl = rowRefs.current.get(currentRoundIndex);
-  if (!rowEl) return;
+    const hasCustomMeta = Boolean(
+      (draft.name || "").trim() ||
+      (draft.location || "").trim() ||
+      (draft.notes || "").trim() ||
+      (draft.tags || []).length
+    );
 
-  rowEl.scrollIntoView({
-    behavior: "smooth",
-    block: "nearest",
-    inline: "nearest",
-  });
-}, [currentRoundIndex, tab]);
+    const hasExtraPlayers = (draft.players || []).length > 2;
+    const hasRenamedPlayers = (draft.players || []).some((p, idx) => (p.name || "").trim() !== `Player ${idx + 1}`);
 
-    return (
+    return hasScores || hasCustomMeta || hasExtraPlayers || hasRenamedPlayers;
+  }, [draft]);
+
+  useEffect(() => {
+    if (tab !== "score") return;
+    const rowEl = rowRefs.current.get(currentRoundIndex);
+    if (!rowEl) return;
+    rowEl.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+  }, [currentRoundIndex, tab]);
+
+  return (
     <>
       <style>{styles}</style>
       <div className="container">
@@ -847,95 +900,62 @@ useEffect(() => {
             <div className="sub">5 Crowns-first • autosave • history • edit • rounds won</div>
           </div>
           <div className="tabs">
-            <button className={`tab ${tab === "new" ? "active" : ""}`} onClick={() => setTab("new")}>
-              New Game
-            </button>
-            <button
-              className={`tab ${tab === "score" ? "active" : ""}`}
-              onClick={() => setTab("score")}
-            >
-              Scoring
-            </button>
-            <button
-              className={`tab ${tab === "history" ? "active" : ""}`}
-              onClick={() => setTab("history")}
-            >
-              History <span className="badge">{history.length}</span>
-            </button>
+            <button className={`tab ${tab === "new" ? "active" : ""}`} onClick={() => setTab("new")}>New Game</button>
+            <button className={`tab ${tab === "score" ? "active" : ""}`} onClick={() => setTab("score")}>Scoring</button>
+            <button className={`tab ${tab === "history" ? "active" : ""}`} onClick={() => setTab("history")}>History <span className="badge">{history.length}</span></button>
           </div>
         </div>
 
         {(tab === "new" || tab === "score") && (
           <div className="row" style={{ marginBottom: 10 }}>
-            <button className="btn" onClick={undo} disabled={!undoStack.length}>
-              ⟲ Undo Last Change
-            </button>
-            <button className="btn" onClick={resetDraft}>
-              Reset
-            </button>
-            <div className="small" style={{ marginLeft: "auto" }}>
-              Autosaving…
-            </div>
+            <button className="btn" onClick={undo} disabled={!undoStack.length}>⟲ Undo Last Change</button>
+            <button className="btn" onClick={resetDraft}>Reset</button>
+            <div className="small" style={{ marginLeft: "auto" }}>Autosaving…</div>
           </div>
         )}
 
         {tab === "new" && (
           <div className="grid">
             <div className="panel">
+              <div className="heroCard">
+                <div className="heroTitle">Five Crowns Scorekeeper</div>
+                <div className="heroSub">Track rounds, dealer, wild card, cards dealt, history, and winners without using paper.</div>
+                <div className="heroChips">
+                  <div className="heroChip">Autosaves</div>
+                  <div className="heroChip">Dealer rotation</div>
+                  <div className="heroChip">Round helper</div>
+                  <div className="heroChip">Late join support</div>
+                </div>
+              </div>
               <div className="label">Game name (optional)</div>
-              <input
-                className="input"
-                value={draft.name}
-                onChange={(e) => setDraftField("name", e.target.value)}
-                placeholder="e.g., Friday Night 5 Crowns"
-              />
-
+              <input className="input" value={draft.name} onChange={(e) => setDraftField("name", e.target.value)} placeholder="e.g., Friday Night 5 Crowns" />
               <div style={{ height: 10 }} />
-
               <div className="label">Location (optional)</div>
-              <input
-                className="input"
-                value={draft.location}
-                onChange={(e) => setDraftField("location", e.target.value)}
-                placeholder="e.g., Home, Cabin, Mike’s place"
-              />
-
+              <input className="input" value={draft.location} onChange={(e) => setDraftField("location", e.target.value)} placeholder="e.g., Home, Cabin, Mike’s place" />
               <div style={{ height: 10 }} />
-
               <div className="label">Notes (optional)</div>
-              <textarea
-                className="textarea"
-                value={draft.notes}
-                onChange={(e) => setDraftField("notes", e.target.value)}
-                placeholder="Anything you want to remember about this game…"
-              />
-
+              <textarea className="textarea" value={draft.notes} onChange={(e) => setDraftField("notes", e.target.value)} placeholder="Anything you want to remember about this game…" />
               <div className="hr" />
-
               <div className="label">Tags</div>
               <div className="chips" style={{ marginBottom: 10 }}>
                 {DEFAULT_TAGS.map((t) => (
-                  <div
-                    key={t}
-                    className={`chip ${(draft.tags || []).includes(t) ? "on" : ""}`}
-                    onClick={() => toggleTag(t, "draft")}
-                    title="Click to toggle"
-                  >
-                    {t}
-                  </div>
+                  <div key={t} className={`chip ${(draft.tags || []).includes(t) ? "on" : ""}`} onClick={() => toggleTag(t, "draft")} title="Click to toggle">{t}</div>
                 ))}
               </div>
-
               <TagAdder onAdd={(t) => addCustomTag(t, "draft")} />
-
               <div className="hr" />
-
-              <button className="btn primary" onClick={startGame}>
-                Start Scoring →
-              </button>
-              <div className="small" style={{ marginTop: 8 }}>
-                Tip: Scoring screen uses rounds as rows and players as columns. Enter moves right.
-              </div>
+              {hasDraftInProgress ? (
+                <div style={{ marginBottom: 12 }}>
+                  <div className="small" style={{ marginBottom: 8 }}>
+                    You already have a game in progress on this device.
+                  </div>
+                  <button className="btn" onClick={() => setTab("score")}>
+                    Resume Current Game
+                  </button>
+                </div>
+              ) : null}
+              <button className="btn primary" onClick={startGame}>Start Scoring →</button>
+              <div className="small" style={{ marginTop: 8 }}>Tip: Scoring screen uses rounds as rows and players as columns. Enter moves right.</div>
             </div>
 
             <div className="panel">
@@ -944,43 +964,20 @@ useEffect(() => {
                   <div style={{ fontWeight: 800 }}>Players</div>
                   <div className="small">Add players, rename them, remove as needed.</div>
                 </div>
-                <button className="btn" onClick={() => addPlayer("draft")}>
-                  + Add player
-                </button>
+                <button className="btn" onClick={() => addPlayer("draft")}>+ Add player</button>
               </div>
-
               <div style={{ height: 10 }} />
-
               <div className="historyList">
                 {draft.players.map((p, idx) => (
                   <div key={p.id} className="row">
-                    <input
-                      className="input"
-                      value={p.name}
-                      onChange={(e) => setPlayerName(p.id, e.target.value, "draft")}
-                      placeholder={`Player ${idx + 1}`}
-                    />
-                    <button
-                      className="btn"
-                      disabled={draft.players.length <= 2}
-                      onClick={() => removePlayer(p.id, "draft")}
-                      title={draft.players.length <= 2 ? "Need at least 2 players" : "Remove"}
-                    >
-                      Remove
-                    </button>
+                    <input className="input" value={p.name} onChange={(e) => setPlayerName(p.id, e.target.value, "draft")} placeholder={`Player ${idx + 1}`} />
+                    <button className="btn" disabled={draft.players.length <= 2} onClick={() => removePlayer(p.id, "draft")}>Remove</button>
                   </div>
                 ))}
               </div>
-
               <div className="hr" />
-
-              <div className="small">
-                Rounds: <b>11</b> (3 → 13). Winner: <b>lowest total</b>. Mark ⭐ for who went out first
-                each round (drives “Rounds Won”).
-              </div>
-              <div className="small" style={{ marginTop: 8 }}>
-                Tip: Add players in seating/dealer order. The first player deals first, then dealer rotates across the row.
-              </div>
+              <div className="small">Rounds: <b>11</b> (3 → 13). Winner: <b>lowest total</b>. Mark ⭐ for who went out first each round (drives “Rounds Won”).</div>
+              <div className="small" style={{ marginTop: 8 }}>Tip: Add players in seating/dealer order. The first player deals first, then dealer rotates across the row.</div>
             </div>
           </div>
         )}
@@ -1002,47 +999,24 @@ useEffect(() => {
               <div className="row">
                 {tab === "score" && (
                   <>
-                    <button className="btn" onClick={addLatePlayer}>
-                      + Add Player
-                    </button>
-                                        <button className="btn primary" onClick={finishAndSave}>
-                      Finish & Save
-                    </button>
+                    <button className="btn" onClick={addLatePlayer}>+ Add Player</button>
+                    <button className="btn primary" onClick={finishAndSave}>Finish & Save</button>
                   </>
                 )}
-
                 {tab === "edit" && (
                   <>
-                    <button className="btn" onClick={() => setTab("history")}>
-                      Cancel
-                    </button>
-                    <button className="btn primary" onClick={saveEdits}>
-                      Save changes
-                    </button>
+                    <button className="btn" onClick={() => setTab("history")}>Cancel</button>
+                    <button className="btn primary" onClick={saveEdits}>Save changes</button>
                   </>
                 )}
               </div>
             </div>
 
             <div className="hr" />
-
             <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
-              <div className="small">
-                Leader:{" "}
-                <b>
-                  {winners.length
-                    ? current.players
-                        .filter((p) => winners.includes(p.id))
-                        .map((p) => p.name)
-                        .join(", ")
-                    : "—"}
-                </b>
-              </div>
-              <div className="small">
-                Enter moves right → end of row goes down. ⭐ marks “went out first.” Tap a player name above to rename them.
-              </div>
+              <div className="small">Leader: <b>{winners.length ? current.players.filter((p) => winners.includes(p.id)).map((p) => p.name).join(", ") : "—"}</b></div>
+              <div className="small">Enter moves right → end of row goes down. ⭐ marks “went out first.” Tap a player name above to rename them.</div>
             </div>
-
             <div style={{ height: 10 }} />
 
             <div className="tableWrap">
@@ -1055,17 +1029,7 @@ useEffect(() => {
                         <button
                           type="button"
                           onClick={() => editPlayerName(p.id)}
-                          style={{
-                            background: "transparent",
-                            border: "none",
-                            padding: 0,
-                            margin: 0,
-                            font: "inherit",
-                            color: "inherit",
-                            cursor: "pointer",
-                            textAlign: "left",
-                            fontWeight: 700,
-                          }}
+                          style={{ background: "transparent", border: "none", padding: 0, margin: 0, font: "inherit", color: "inherit", cursor: "pointer", textAlign: "left", fontWeight: 700 }}
                           title="Rename player"
                         >
                           {p.name}
@@ -1075,20 +1039,16 @@ useEffect(() => {
                     ))}
                   </tr>
                 </thead>
-
                 <tbody>
                   {current.roundLabels.map((label, rIdx) => (
-                      <tr 
-                        key={label}
-                        ref={(el) => {
-                          if (el) rowRefs.current.set(rIdx, el);
-                          else rowRefs.current.delete(rIdx);
-                        }}
-                        style={{
-                          background: rIdx % 2 === 1 ? "var(--rowAlt)" : "transparent",
-                        }}
-                      >
-
+                    <tr
+                      key={label}
+                      ref={(el) => {
+                        if (el) rowRefs.current.set(rIdx, el);
+                        else rowRefs.current.delete(rIdx);
+                      }}
+                      style={{ background: rIdx % 2 === 1 ? "var(--rowAlt)" : "transparent" }}
+                    >
                       <td
                         className="td round"
                         style={{
@@ -1098,61 +1058,47 @@ useEffect(() => {
                       >
                         <div>{"R " + label}</div>
                         <div className="dealerPill">Dealer: {getDealerName(current.players, rIdx)}</div>
+                        <div className="small" style={{ marginTop: 6 }}>Wild: {getRoundMeta(label, rIdx).wild} • Cards: {getRoundMeta(label, rIdx).cardsDealt}</div>
                         {rIdx === currentRoundIndex ? <div className="currentPill">Current</div> : null}
                       </td>
                       {current.players.map((p, pIdx) => {
-                         const val = current.rounds?.[rIdx]?.scores?.[p.id];
-                          const wentOut = (current.rounds?.[rIdx]?.wentOutId || "") === p.id;
-
+                        const val = current.rounds?.[rIdx]?.scores?.[p.id];
+                        const wentOut = (current.rounds?.[rIdx]?.wentOutId || "") === p.id;
                         return (
-                      <td className="td" key={p.id}>
-                        <div className="cell">
-                          <input
-                            className="scoreInput"
-                            inputMode="numeric"
-                            placeholder="0"
-                            value={typeof val === "number" ? String(val) : ""}
-                            ref={(el) => {
-                              if (!el) return;
-                              inputRefs.current.set(`${rIdx}_${pIdx}`, el);
-                            }}
-                            onKeyDown={(e) => onScoreKeyDown(e, rIdx, pIdx, context)}
-                            onChange={(e) => onScoreChange(rIdx, pIdx, e.target.value, context)}
-                            onFocus={(e) => e.target.select?.()}
-                          />
-                          <button
-                            className={`starBtn ${wentOut ? "on" : ""}`}
-                            onClick={() => toggleWentOut(rIdx, pIdx, context)}
-                            title={wentOut ? "Unmark went out first" : "Mark went out first"}
-                          >
-                            ⭐
-                          </button>
-                        </div>
-                      </td>
-                    );
-                  })}
-
+                          <td className="td" key={p.id}>
+                            <div className="cell">
+                              <input
+                                className="scoreInput"
+                                inputMode="numeric"
+                                placeholder="0"
+                                value={typeof val === "number" ? String(val) : ""}
+                                ref={(el) => {
+                                  if (!el) return;
+                                  inputRefs.current.set(`${rIdx}_${pIdx}`, el);
+                                }}
+                                onKeyDown={(e) => onScoreKeyDown(e, rIdx, pIdx, context)}
+                                onChange={(e) => onScoreChange(rIdx, pIdx, e.target.value, context)}
+                                onFocus={(e) => e.target.select?.()}
+                              />
+                              <button className={`starBtn ${wentOut ? "on" : ""}`} onClick={() => toggleWentOut(rIdx, pIdx, context)} title={wentOut ? "Unmark went out first" : "Mark went out first"}>⭐</button>
+                            </div>
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
-
                 <tfoot>
                   <tr className="totalRow">
                     <th className="th round">Total</th>
                     {current.players.map((p) => (
-                      <td className="td" key={p.id}>
-                        <span className={winners.includes(p.id) ? "winnerCell" : ""}>
-                          {totals[p.id] ?? 0}
-                        </span>
-                      </td>
+                      <td className="td" key={p.id}><span className={winners.includes(p.id) ? "winnerCell" : ""}>{totals[p.id] ?? 0}</span></td>
                     ))}
                   </tr>
                   <tr className="totalRow">
                     <th className="th round">Rounds Won</th>
                     {current.players.map((p) => (
-                      <td className="td" key={p.id}>
-                        {roundsWon[p.id] ?? 0}
-                      </td>
+                      <td className="td" key={p.id}>{roundsWon[p.id] ?? 0}</td>
                     ))}
                   </tr>
                 </tfoot>
@@ -1160,59 +1106,24 @@ useEffect(() => {
             </div>
 
             <div className="hr" />
-
             <div className="grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
               <div>
                 <div className="label">Notes</div>
-                <textarea
-                  className="textarea"
-                  value={current.notes || ""}
-                  onChange={(e) =>
-                    tab === "edit" ? setEditField("notes", e.target.value) : setDraftField("notes", e.target.value)
-                  }
-                  placeholder="Optional"
-                />
+                <textarea className="textarea" value={current.notes || ""} onChange={(e) => (tab === "edit" ? setEditField("notes", e.target.value) : setDraftField("notes", e.target.value))} placeholder="Optional" />
               </div>
               <div>
                 <div className="label">Location</div>
-                <input
-                  className="input"
-                  value={current.location || ""}
-                  onChange={(e) =>
-                    tab === "edit"
-                      ? setEditField("location", e.target.value)
-                      : setDraftField("location", e.target.value)
-                  }
-                  placeholder="Optional"
-                />
-
+                <input className="input" value={current.location || ""} onChange={(e) => (tab === "edit" ? setEditField("location", e.target.value) : setDraftField("location", e.target.value))} placeholder="Optional" />
                 <div style={{ height: 10 }} />
-
                 <div className="label">Tags</div>
                 <div className="chips" style={{ marginBottom: 10 }}>
                   {DEFAULT_TAGS.map((t) => (
-                    <div
-                      key={t}
-                      className={`chip ${(current.tags || []).includes(t) ? "on" : ""}`}
-                      onClick={() => toggleTag(t, tab === "edit" ? "edit" : "draft")}
-                    >
-                      {t}
-                    </div>
+                    <div key={t} className={`chip ${(current.tags || []).includes(t) ? "on" : ""}`} onClick={() => toggleTag(t, tab === "edit" ? "edit" : "draft")}>{t}</div>
                   ))}
-                  {(current.tags || [])
-                    .filter((t) => !DEFAULT_TAGS.includes(t))
-                    .map((t) => (
-                      <div
-                        key={t}
-                        className={`chip on`}
-                        onClick={() => toggleTag(t, tab === "edit" ? "edit" : "draft")}
-                        title="Click to remove"
-                      >
-                        {t} ✕
-                      </div>
-                    ))}
+                  {(current.tags || []).filter((t) => !DEFAULT_TAGS.includes(t)).map((t) => (
+                    <div key={t} className="chip on" onClick={() => toggleTag(t, tab === "edit" ? "edit" : "draft")} title="Click to remove">{t} ✕</div>
+                  ))}
                 </div>
-
                 <TagAdder onAdd={(t) => addCustomTag(t, tab === "edit" ? "edit" : "draft")} />
               </div>
             </div>
@@ -1223,38 +1134,36 @@ useEffect(() => {
           <div className="grid">
             <div className="panel">
               <div className="label">Search</div>
-              <input
-                className="input"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search name, players, notes, location, tags…"
-              />
-
+              <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, players, notes, location, tags…" />
               <div style={{ height: 10 }} />
-
               <div className="label">Filter by tag</div>
               <div className="chips">
-                <div
-                  className={`chip ${tagFilter === "" ? "on" : ""}`}
-                  onClick={() => setTagFilter("")}
-                >
-                  All
-                </div>
+                <div className={`chip ${tagFilter === "" ? "on" : ""}`} onClick={() => setTagFilter("")}>All</div>
                 {Array.from(new Set(history.flatMap((g) => g.tags || []))).map((t) => (
-                  <div
-                    key={t}
-                    className={`chip ${tagFilter === t ? "on" : ""}`}
-                    onClick={() => setTagFilter(tagFilter === t ? "" : t)}
-                  >
-                    {t}
-                  </div>
+                  <div key={t} className={`chip ${tagFilter === t ? "on" : ""}`} onClick={() => setTagFilter(tagFilter === t ? "" : t)}>{t}</div>
                 ))}
               </div>
-
               <div className="hr" />
-
-              <div className="small">
-                Tip: Tap a game to view/edit. History is stored locally on this device.
+              <div className="small">Tip: Tap a game to view/edit. History is stored locally on this device.</div>
+              <div className="hr" />
+              <div className="label">Backup</div>
+              <div className="row" style={{ flexWrap: "wrap" }}>
+                <button className="btn" onClick={exportBackup}>Export Backup</button>
+                <button className="btn" onClick={() => importFileRef.current?.click()}>Import Backup</button>
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept="application/json"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    importBackupFromFile(file);
+                    e.target.value = "";
+                  }}
+                />
+              </div>
+              <div className="small" style={{ marginTop: 8 }}>
+                Export saves your history and current in-progress game to a JSON file.
               </div>
             </div>
 
@@ -1265,9 +1174,7 @@ useEffect(() => {
                   <div className="small">{filteredHistory.length} shown</div>
                 </div>
               </div>
-
               <div style={{ height: 10 }} />
-
               {!filteredHistory.length ? (
                 <div className="small">No games yet. Finish a game to save it.</div>
               ) : (
@@ -1275,41 +1182,15 @@ useEffect(() => {
                   {filteredHistory.map((g) => {
                     const t = g.totals || computeTotals(g.players || [], g.rounds || []);
                     const w = g.winnerIds || winnerIds(g.players || [], t);
-                    const winnerNames = (g.players || [])
-                      .filter((p) => w.includes(p.id))
-                      .map((p) => p.name)
-                      .join(", ");
-
+                    const winnerNames = (g.players || []).filter((p) => w.includes(p.id)).map((p) => p.name).join(", ");
                     return (
-                      <button
-                        key={g.id}
-                        className={`historyItem ${editGameId === g.id ? "active" : ""}`}
-                        onClick={() => openForEdit(g.id)}
-                      >
-                        <div className="historyTitle">
-                          {(g.name || "").trim() ? g.name : "Game"}{" "}
-                          <span className="badge">{winnerNames ? `Winner: ${winnerNames}` : "—"}</span>
-                        </div>
-                        <div className="historyMeta">
-                          {formatDate(g.savedAt || g.createdAt)}
-                          {g.location ? ` • ${g.location}` : ""}
-                        </div>
-                        <div className="historyMeta">
-                          Players: {(g.players || []).map((p) => p.name).join(", ")}
-                        </div>
-                        <div className="historyMeta">
-                          Tags: {(g.tags || []).length ? (g.tags || []).join(", ") : "—"}
-                        </div>
+                      <button key={g.id} className={`historyItem ${editGameId === g.id ? "active" : ""}`} onClick={() => openForEdit(g.id)}>
+                        <div className="historyTitle">{(g.name || "").trim() ? g.name : "Game"} <span className="badge">{winnerNames ? `Winner: ${winnerNames}` : "—"}</span></div>
+                        <div className="historyMeta">{formatDate(g.savedAt || g.createdAt)}{g.location ? ` • ${g.location}` : ""}</div>
+                        <div className="historyMeta">Players: {(g.players || []).map((p) => p.name).join(", ")}</div>
+                        <div className="historyMeta">Tags: {(g.tags || []).length ? (g.tags || []).join(", ") : "—"}</div>
                         <div className="row" style={{ marginTop: 10 }}>
-                          <button
-                            className="btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteGame(g.id);
-                            }}
-                          >
-                            Delete
-                          </button>
+                          <button className="btn" onClick={(e) => { e.stopPropagation(); deleteGame(g.id); }}>Delete</button>
                         </div>
                       </button>
                     );
