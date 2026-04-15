@@ -979,6 +979,13 @@ export default function App() {
               ) : null}
               <button className="btn primary" onClick={startGame}>Start Scoring →</button>
               <div className="small" style={{ marginTop: 8 }}>Tip: Scoring screen uses rounds as rows and players as columns. Enter moves right.</div>
+              <div style={{ height: 10 }} />
+              <a
+                className="btn"
+                href="mailto:lyonss31095@yahoo.com?subject=Five%20Crowns%20Scorekeeper%20Feedback"
+              >
+                Send Feedback
+              </a>
             </div>
 
             <div className="panel">
