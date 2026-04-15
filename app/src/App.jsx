@@ -358,10 +358,30 @@ a{ color: inherit; }
   background: linear-gradient(180deg, rgba(109,40,217,0.08), rgba(109,40,217,0.02));
   margin-bottom: 12px;
 }
+.heroHeader{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin-bottom: 6px;
+}
+.heroLogoBadge{
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, #7C3AED, #5B21B6);
+  color: white;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size: 22px;
+  font-weight: 800;
+  flex: 0 0 auto;
+}
 .heroTitle{
   font-size: 20px;
   font-weight: 800;
-  margin: 0 0 6px 0;
+  margin: 0;
 }
 .heroSub{
   font-size: 13px;
@@ -918,7 +938,10 @@ export default function App() {
           <div className="grid">
             <div className="panel">
               <div className="heroCard">
-                <div className="heroTitle">Five Crowns Scorekeeper</div>
+                <div className="heroHeader">
+                  <div className="heroLogoBadge">5</div>
+                  <div className="heroTitle">Five Crowns Scorekeeper</div>
+                </div>
                 <div className="heroSub">Track rounds, dealer, wild card, cards dealt, history, and winners without using paper.</div>
                 <div className="heroChips">
                   <div className="heroChip">Autosaves</div>
