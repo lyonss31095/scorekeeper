@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const LS_DRAFT = "scorekeeper_draft_v1";
 const LS_HISTORY = "scorekeeper_history_v1";
+const LS_PLAYER_PROFILES = "scorekeeper_player_profiles_v1";
 
 const DEFAULT_TAGS = ["family", "friends", "game night", "tournament", "home", "travel"];
 
@@ -22,6 +23,43 @@ function clampScore(n) {
   const MAX = 200;
   if (!Number.isFinite(n)) return 0;
   return Math.max(0, Math.min(MAX, n));
+}
+
+function faceCardValue(label) {
+  if (label === "J") return 11;
+  if (label === "Q") return 12;
+  if (label === "K") return 13;
+  const n = Number(label);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function createScoreHelperCounts() {
+  return {
+    joker: 0,
+    wild: 0,
+    "3": 0,
+    "4": 0,
+    "5": 0,
+    "6": 0,
+    "7": 0,
+    "8": 0,
+    "9": 0,
+    "10": 0,
+    J: 0,
+    Q: 0,
+    K: 0,
+  };
+}
+
+function computeScoreHelperTotal(counts) {
+  const safeCounts = counts || {};
+  let total = (safeCounts.joker || 0) * 50 + (safeCounts.wild || 0) * 20;
+
+  for (const label of ["3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]) {
+    total += (safeCounts[label] || 0) * faceCardValue(label);
+  }
+
+  return total;
 }
 
 function roundsFor5Crowns() {
@@ -58,6 +96,58 @@ function computeRoundsWon(players, rounds) {
     if (r.wentOutId && wins[r.wentOutId] !== undefined) wins[r.wentOutId] += 1;
   }
   return wins;
+}
+
+function computeBestRound(players, rounds) {
+  let best = null;
+
+  for (let rIdx = 0; rIdx < rounds.length; rIdx++) {
+    const round = rounds[rIdx];
+    for (const player of players) {
+      const value = round?.scores?.[player.id];
+      if (typeof value !== "number") continue;
+      if (!best || value < best.score) {
+        best = { playerId: player.id, roundIndex: rIdx, score: value };
+      }
+    }
+  }
+
+  return best;
+}
+
+function computeWorstRound(players, rounds) {
+  let worst = null;
+
+  for (let rIdx = 0; rIdx < rounds.length; rIdx++) {
+    const round = rounds[rIdx];
+    for (const player of players) {
+      const value = round?.scores?.[player.id];
+      if (typeof value !== "number") continue;
+      if (!worst || value > worst.score) {
+        worst = { playerId: player.id, roundIndex: rIdx, score: value };
+      }
+    }
+  }
+
+  return worst;
+}
+
+function buildStandings(players, totals, roundsWon) {
+  return [...players]
+    .sort((a, b) => {
+      const totalDiff = (totals[a.id] ?? 0) - (totals[b.id] ?? 0);
+      if (totalDiff !== 0) return totalDiff;
+      const winsDiff = (roundsWon[b.id] ?? 0) - (roundsWon[a.id] ?? 0);
+      if (winsDiff !== 0) return winsDiff;
+      return a.name.localeCompare(b.name);
+    })
+    .map((player, index) => ({
+      rank: index + 1,
+      id: player.id,
+      name: player.name,
+      total: totals[player.id] ?? 0,
+      roundsWon: roundsWon[player.id] ?? 0,
+    }));
 }
 
 function getDealerName(players, roundIndex) {
@@ -97,6 +187,132 @@ function formatDate(iso) {
 
 function normalizeTag(tag) {
   return tag.trim().replace(/\s+/g, " ");
+}
+
+function normalizePlayerName(name) {
+  return normalizeTag(String(name || "")).toLowerCase();
+}
+
+function buildPlayerStats(history) {
+  const stats = new Map();
+
+  for (const game of history || []) {
+    const players = game.players || [];
+    if (!players.length) continue;
+
+    const totals = game.totals || computeTotals(players, game.rounds || []);
+    const roundsWon = computeRoundsWon(players, game.rounds || []);
+
+    const standings = [...players]
+      .map((player) => ({
+        id: player.id,
+        key: player.profileId || normalizePlayerName(player.name || "Player"),
+        name: normalizeTag(player.name || "Player"),
+        total: totals[player.id] ?? 0,
+        roundsWon: roundsWon[player.id] ?? 0,
+      }))
+      .sort((a, b) => {
+        const totalDiff = a.total - b.total;
+        if (totalDiff !== 0) return totalDiff;
+
+        const roundsWonDiff = b.roundsWon - a.roundsWon;
+        if (roundsWonDiff !== 0) return roundsWonDiff;
+
+        return a.name.localeCompare(b.name);
+      });
+
+    standings.forEach((player, index) => {
+      const key = player.key;
+      if (!key) return;
+
+      if (!stats.has(key)) {
+        stats.set(key, {
+          key,
+          name: player.name,
+          gamesPlayed: 0,
+          wins: 0,
+          second: 0,
+          third: 0,
+          totalPoints: 0,
+          bestFinish: Infinity,
+        });
+      }
+
+      const entry = stats.get(key);
+      entry.name = player.name;
+      entry.gamesPlayed += 1;
+      entry.totalPoints += player.total;
+      entry.bestFinish = Math.min(entry.bestFinish, index + 1);
+
+      if (index === 0) entry.wins += 1;
+      if (index === 1) entry.second += 1;
+      if (index === 2) entry.third += 1;
+    });
+  }
+
+  return Array.from(stats.values())
+    .map((entry) => ({
+      ...entry,
+      averagePoints: entry.gamesPlayed
+        ? Math.round((entry.totalPoints / entry.gamesPlayed) * 10) / 10
+        : 0,
+      bestFinish: Number.isFinite(entry.bestFinish) ? entry.bestFinish : "—",
+    }))
+    .sort((a, b) => {
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      if (b.second !== a.second) return b.second - a.second;
+      if (a.averagePoints !== b.averagePoints) return a.averagePoints - b.averagePoints;
+      return a.name.localeCompare(b.name);
+    });
+}
+
+function syncPlayerProfilesWithPlayers(existingProfiles, players) {
+  const now = new Date().toISOString();
+  const profiles = [...(existingProfiles || [])].map((profile) => ({ ...profile }));
+  const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
+  const profilesByName = new Map(
+    profiles.map((profile) => [normalizePlayerName(profile.name || ""), profile])
+  );
+
+  const syncedPlayers = (players || []).map((player) => {
+    const cleanName = normalizeTag(player.name || "") || "Player";
+    let profile = player.profileId ? profilesById.get(player.profileId) : null;
+
+    if (!profile) {
+      profile = profilesByName.get(normalizePlayerName(cleanName));
+    }
+
+    if (!profile) {
+      profile = {
+        id: uid(),
+        name: cleanName,
+        createdAt: now,
+        lastUsedAt: now,
+      };
+      profiles.push(profile);
+      profilesById.set(profile.id, profile);
+      profilesByName.set(normalizePlayerName(profile.name), profile);
+    } else {
+      profile.name = cleanName;
+      profile.lastUsedAt = now;
+      profilesByName.set(normalizePlayerName(profile.name), profile);
+    }
+
+    return {
+      ...player,
+      name: cleanName,
+      profileId: profile.id,
+    };
+  });
+
+  const sortedProfiles = profiles.sort((a, b) => {
+    const timeA = new Date(a.lastUsedAt || a.createdAt || 0).getTime();
+    const timeB = new Date(b.lastUsedAt || b.createdAt || 0).getTime();
+    if (timeB !== timeA) return timeB - timeA;
+    return (a.name || "").localeCompare(b.name || "");
+  });
+
+  return { profiles: sortedProfiles, players: syncedPlayers };
 }
 
 function ensureUniqueNames(players) {
@@ -351,6 +567,248 @@ a{ color: inherit; }
 .historyItem.active{ border-color: var(--primary); }
 .historyTitle{ font-weight: 800; }
 .historyMeta{ margin-top: 4px; font-size: 12px; color: var(--muted); }
+.summaryCard{
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(109,40,217,0.06), rgba(109,40,217,0.02));
+  border-radius: 16px;
+  padding: 14px;
+}
+.summaryTitle{
+  font-size: 18px;
+  font-weight: 900;
+  margin: 0 0 6px 0;
+}
+.summaryWinner{
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+.summaryGrid{
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr;
+}
+.summaryStat{
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.6);
+}
+.summaryStatLabel{
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+.summaryStatValue{
+  font-size: 14px;
+  font-weight: 800;
+}
+.standingsList{
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.standingRow{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.6);
+}
+.standingLeft{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.rankBadge{
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 800;
+  background: var(--chip);
+  border: 1px solid var(--border);
+}
+.standingName{
+  font-weight: 800;
+}
+.standingMeta{
+  font-size: 12px;
+  color: var(--muted);
+}
+.playerStatsList{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.playerStatCard{
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(255,255,255,0.65);
+}
+.playerStatHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:8px;
+}
+.playerStatName{
+  font-weight: 900;
+}
+.playerStatGrid{
+  display:grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap:8px;
+}
+.playerStatItem{
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.75);
+}
+.playerStatLabel{
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+  font-weight: 700;
+}
+.playerStatValue{
+  font-size: 14px;
+  font-weight: 800;
+}
+.profileRow{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:10px 12px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background: rgba(255,255,255,0.7);
+}
+.profileName{
+  font-weight:800;
+}
+.profileActions{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.sheetOverlay{
+  position: fixed;
+  inset: 0;
+  background: rgba(10,10,10,0.35);
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 12px;
+}
+.sheetPanel{
+  width: min(640px, 100%);
+  max-height: 85vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--panel);
+  padding: 14px;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.18);
+}
+.sheetHandle{
+  width: 44px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--border);
+  margin: 0 auto 12px auto;
+}
+.helperPanel{
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(109,40,217,0.04);
+  margin-top: 12px;
+}
+.helperHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom: 10px;
+}
+.helperGrid{
+  display:grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap:8px;
+}
+.helperCard{
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.8);
+}
+.helperCardTitle{
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+.helperStepper{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+}
+.helperCount{
+  min-width: 24px;
+  text-align:center;
+  font-weight: 800;
+}
+.helperMiniBtn{
+  border: 1px solid var(--border);
+  background: var(--chip);
+  color: var(--chipText);
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.quickActionBtn{
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.7);
+  color: var(--text);
+  padding: 12px;
+  border-radius: 14px;
+  cursor: pointer;
+}
+.quickActionTitle{
+  font-size: 13px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+.quickActionSub{
+  font-size: 12px;
+  color: var(--muted);
+}
+@media (min-width: 760px){
+  .helperGrid{ grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (min-width: 760px){
+  .summaryGrid{ grid-template-columns: repeat(3, 1fr); }
+}
 .heroCard{
   padding: 14px;
   border: 1px solid var(--border);
@@ -417,6 +875,8 @@ function pushUndo(stack, entry) {
 export default function App() {
   const [tab, setTab] = useState("new");
   const [history, setHistory] = useState([]);
+  const [playerProfiles, setPlayerProfiles] = useState([]);
+  const [profileSearch, setProfileSearch] = useState("");
   const [draft, setDraft] = useState(() => ({
     id: uid(),
     gameType: "5crowns",
@@ -437,13 +897,22 @@ export default function App() {
   const [editGame, setEditGame] = useState(null);
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState("");
+  const [saveStatus, setSaveStatus] = useState("Saved");
+  const [renamingPlayerId, setRenamingPlayerId] = useState("");
+  const [renamingValue, setRenamingValue] = useState("");
+  const [scoreHelper, setScoreHelper] = useState(null);
+  const [scoreEntrySheet, setScoreEntrySheet] = useState(null);
   const inputRefs = useRef(new Map());
   const rowRefs = useRef(new Map());
   const importFileRef = useRef(null);
+  const helperPanelRef = useRef(null);
 
   useEffect(() => {
     const h = safeParse(localStorage.getItem(LS_HISTORY) || "[]", []);
     setHistory(Array.isArray(h) ? h : []);
+
+    const savedProfiles = safeParse(localStorage.getItem(LS_PLAYER_PROFILES) || "[]", []);
+    setPlayerProfiles(Array.isArray(savedProfiles) ? savedProfiles : []);
 
     const d = safeParse(localStorage.getItem(LS_DRAFT) || "null", null);
     if (d && d.players && d.rounds && d.roundLabels) {
@@ -456,9 +925,20 @@ export default function App() {
   }, [history]);
 
   useEffect(() => {
-    if (tab === "new" || tab === "score") {
-      localStorage.setItem(LS_DRAFT, JSON.stringify(draft));
-    }
+    localStorage.setItem(LS_PLAYER_PROFILES, JSON.stringify(playerProfiles));
+  }, [playerProfiles]);
+
+  useEffect(() => {
+    if (tab !== "new" && tab !== "score") return;
+
+    setSaveStatus("Saving...");
+    localStorage.setItem(LS_DRAFT, JSON.stringify(draft));
+
+    const timeoutId = window.setTimeout(() => {
+      setSaveStatus("Saved");
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
   }, [draft, tab]);
 
   const context = tab === "edit" ? "edit" : "draft";
@@ -478,9 +958,93 @@ export default function App() {
       const nextPlayerNumber = (prev.players?.length || 0) + 1;
       const nextPlayers = [
         ...(prev.players || []),
-        { id: uid(), name: `Player ${nextPlayerNumber}`, joinRound: 0 },
+        { id: uid(), name: `Player ${nextPlayerNumber}`, joinRound: 0, profileId: "" },
       ];
       return { ...prev, players: nextPlayers };
+    });
+  }
+
+  function addSavedPlayerToDraft(profileId) {
+    const profile = playerProfiles.find((p) => p.id === profileId);
+    if (!profile) return;
+
+    setDraft((prev) => {
+      const alreadyInGame = (prev.players || []).some((player) => player.profileId === profileId);
+      if (alreadyInGame) return prev;
+
+      return {
+        ...prev,
+        players: [
+          ...(prev.players || []),
+          { id: uid(), name: profile.name, joinRound: 0, profileId: profile.id },
+        ],
+      };
+    });
+  }
+
+  function renamePlayerProfile(profileId) {
+    const profile = playerProfiles.find((p) => p.id === profileId);
+    if (!profile) return;
+
+    const nextName = prompt("Rename saved player", profile.name || "");
+    if (nextName == null) return;
+
+    const cleanName = normalizeTag(nextName || "");
+    if (!cleanName) return;
+
+    setPlayerProfiles((prev) =>
+      prev.map((item) => (item.id === profileId ? { ...item, name: cleanName } : item))
+    );
+
+    setDraft((prev) => ({
+      ...prev,
+      players: (prev.players || []).map((player) =>
+        player.profileId === profileId ? { ...player, name: cleanName } : player
+      ),
+    }));
+
+    setEditGame((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        players: (prev.players || []).map((player) =>
+          player.profileId === profileId ? { ...player, name: cleanName } : player
+        ),
+      };
+    });
+
+    setHistory((prev) =>
+      prev.map((game) => ({
+        ...game,
+        players: (game.players || []).map((player) =>
+          player.profileId === profileId ? { ...player, name: cleanName } : player
+        ),
+      }))
+    );
+  }
+
+  function deletePlayerProfile(profileId) {
+    const profile = playerProfiles.find((p) => p.id === profileId);
+    if (!profile) return;
+    if (!confirm(`Delete saved player profile for ${profile.name}? Existing game history will stay intact.`)) return;
+
+    setPlayerProfiles((prev) => prev.filter((item) => item.id !== profileId));
+
+    setDraft((prev) => ({
+      ...prev,
+      players: (prev.players || []).map((player) =>
+        player.profileId === profileId ? { ...player, profileId: "" } : player
+      ),
+    }));
+
+    setEditGame((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        players: (prev.players || []).map((player) =>
+          player.profileId === profileId ? { ...player, profileId: "" } : player
+        ),
+      };
     });
   }
 
@@ -489,9 +1053,15 @@ export default function App() {
     return computeTotals(current.players || [], current.rounds || []);
   }, [current]);
 
-  const currentRoundIndex = current?.rounds?.findIndex((round) =>
-    current.players.some((p) => round.scores?.[p.id] == null)
-  ) ?? 0;
+  const currentRoundIndex = useMemo(() => {
+    if (!current?.rounds?.length || !current?.players?.length) return 0;
+
+    const firstIncompleteRound = current.rounds.findIndex((round) =>
+      current.players.some((p) => round.scores?.[p.id] == null)
+    );
+
+    return firstIncompleteRound === -1 ? current.rounds.length - 1 : firstIncompleteRound;
+  }, [current]);
 
   function addLatePlayer() {
     const newPlayerNumber = draft.players.length + 1;
@@ -537,20 +1107,46 @@ export default function App() {
   function setPlayerName(playerId, name, to = "draft") {
     const fn = to === "edit" ? setEditGame : setDraft;
     fn((prev) => {
-      const nextPlayers = prev.players.map((p) => (p.id === playerId ? { ...p, name } : p));
+      const nextPlayers = prev.players.map((p) => {
+        if (p.id !== playerId) return p;
+        const nextName = name;
+        const normalizedNext = normalizePlayerName(nextName);
+        const normalizedCurrentProfile = normalizePlayerName(
+          playerProfiles.find((profile) => profile.id === p.profileId)?.name || ""
+        );
+
+        return {
+          ...p,
+          name: nextName,
+          profileId: normalizedNext && normalizedNext === normalizedCurrentProfile ? p.profileId : "",
+        };
+      });
       return { ...prev, players: nextPlayers };
     });
   }
 
-  function editPlayerName(playerId) {
+  function startRenamingPlayer(playerId) {
     const game = tab === "edit" ? editGame : draft;
     const player = game?.players?.find((p) => p.id === playerId);
     if (!player) return;
-    const nextName = prompt("New player name", player.name);
-    if (nextName == null) return;
-    const trimmedName = nextName.trim();
-    if (!trimmedName) return;
-    setPlayerName(player.id, trimmedName, context);
+    setRenamingPlayerId(playerId);
+    setRenamingValue(player.name || "");
+  }
+
+  function commitRenamingPlayer(playerId) {
+    const trimmedName = renamingValue.trim();
+    if (!trimmedName) {
+      cancelRenamingPlayer();
+      return;
+    }
+    setPlayerName(playerId, trimmedName, context);
+    setRenamingPlayerId("");
+    setRenamingValue("");
+  }
+
+  function cancelRenamingPlayer() {
+    setRenamingPlayerId("");
+    setRenamingValue("");
   }
 
   function toggleTag(tag, to = "draft") {
@@ -611,6 +1207,110 @@ export default function App() {
       });
       return { ...prev, rounds };
     });
+  }
+
+  function openScoreEntrySheet(rIdx, pIdx) {
+    const game = tab === "edit" ? editGame : draft;
+    const player = game?.players?.[pIdx];
+    if (!player) return;
+
+    const rowLabel = game?.roundLabels?.[rIdx];
+
+    setScoreEntrySheet({
+      rIdx,
+      pIdx,
+      playerId: player.id,
+      playerName: player.name || "Player",
+      rowLabel,
+    });
+    setScoreHelper(null);
+  }
+
+  function closeScoreEntrySheet() {
+    setScoreEntrySheet(null);
+    setScoreHelper(null);
+  }
+
+  function openScoreHelper() {
+    if (!scoreEntrySheet) return;
+
+    setScoreHelper({
+      rIdx: scoreEntrySheet.rIdx,
+      pIdx: scoreEntrySheet.pIdx,
+      playerId: scoreEntrySheet.playerId,
+      playerName: scoreEntrySheet.playerName || "Player",
+      counts: createScoreHelperCounts(),
+    });
+  }
+
+  function chooseManualScoreEntry() {
+    if (!scoreEntrySheet) return;
+    const next = scoreEntrySheet;
+    closeScoreEntrySheet();
+    setTimeout(() => {
+      focusCell(next.rIdx, next.pIdx);
+    }, 0);
+  }
+
+  function closeScoreHelper() {
+    setScoreHelper(null);
+  }
+
+  function updateScoreHelperCount(key, delta) {
+    setScoreHelper((prev) => {
+      if (!prev) return prev;
+      const nextCount = Math.max(0, (prev.counts?.[key] || 0) + delta);
+      return {
+        ...prev,
+        counts: {
+          ...(prev.counts || {}),
+          [key]: nextCount,
+        },
+      };
+    });
+  }
+
+  function resetScoreHelper() {
+    setScoreHelper((prev) => {
+      if (!prev) return prev;
+      return { ...prev, counts: createScoreHelperCounts() };
+    });
+  }
+
+  function applyScoreHelperTotal(markWentOut = false) {
+    if (!scoreHelper) return;
+
+    const total = markWentOut ? 0 : clampScore(computeScoreHelperTotal(scoreHelper.counts));
+    onScoreChange(scoreHelper.rIdx, scoreHelper.pIdx, String(total), context);
+
+    if (markWentOut) {
+      const currentWentOutId = current?.rounds?.[scoreHelper.rIdx]?.wentOutId || "";
+      if (currentWentOutId !== scoreHelper.playerId) {
+        toggleWentOut(scoreHelper.rIdx, scoreHelper.pIdx, context);
+      }
+    }
+
+    const next = { rIdx: scoreHelper.rIdx, pIdx: scoreHelper.pIdx };
+    closeScoreEntrySheet();
+    setTimeout(() => {
+      focusCell(next.rIdx, next.pIdx);
+    }, 0);
+  }
+
+  function applyWentOutZeroFromSheet() {
+    if (!scoreEntrySheet) return;
+    onScoreChange(scoreEntrySheet.rIdx, scoreEntrySheet.pIdx, "0", context);
+
+    const currentWentOutId = current?.rounds?.[scoreEntrySheet.rIdx]?.wentOutId || "";
+    if (currentWentOutId !== scoreEntrySheet.playerId) {
+      toggleWentOut(scoreEntrySheet.rIdx, scoreEntrySheet.pIdx, context);
+    }
+
+    const next = { rIdx: scoreEntrySheet.rIdx, pIdx: scoreEntrySheet.pIdx };
+    closeScoreEntrySheet();
+    setTimeout(() => {
+      focusCell(next.rIdx, next.pIdx);
+    }, 0);
   }
 
   function toggleWentOut(rIdx, pIdx, to = "draft") {
@@ -676,6 +1376,25 @@ export default function App() {
     if (el && typeof el.focus === "function") el.focus();
   }
 
+  function focusNextIncompleteCell(to = "draft") {
+    const game = to === "edit" ? editGame : draft;
+    if (!game?.rounds?.length || !game?.players?.length) return;
+
+    for (let rIdx = 0; rIdx < game.rounds.length; rIdx++) {
+      for (let pIdx = 0; pIdx < game.players.length; pIdx++) {
+        const playerId = game.players[pIdx]?.id;
+        if (!playerId) continue;
+        const value = game.rounds[rIdx]?.scores?.[playerId];
+        if (value == null) {
+          focusCell(rIdx, pIdx);
+          return;
+        }
+      }
+    }
+
+    focusCell(game.rounds.length - 1, game.players.length - 1);
+  }
+
   function onScoreKeyDown(e, rIdx, pIdx, to = "draft") {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -705,7 +1424,12 @@ export default function App() {
       alert(err);
       return;
     }
-    setDraft((prev) => ({ ...prev, players: ensureUniqueNames(prev.players) }));
+
+    const cleanedPlayers = ensureUniqueNames(draft.players);
+    const synced = syncPlayerProfilesWithPlayers(playerProfiles, cleanedPlayers);
+
+    setPlayerProfiles(synced.profiles);
+    setDraft((prev) => ({ ...prev, players: synced.players }));
     setTab("score");
     setTimeout(() => focusCell(0, 0), 0);
   }
@@ -745,9 +1469,10 @@ export default function App() {
     }
 
     const normalizedPlayers = ensureUniqueNames(draft.players);
-    const normalizedDraft = { ...draft, players: normalizedPlayers };
-    const t = computeTotals(normalizedPlayers, normalizedDraft.rounds);
-    const w = winnerIds(normalizedPlayers, t);
+    const synced = syncPlayerProfilesWithPlayers(playerProfiles, normalizedPlayers);
+    const normalizedDraft = { ...draft, players: synced.players };
+    const t = computeTotals(synced.players, normalizedDraft.rounds);
+    const w = winnerIds(synced.players, t);
     const saved = {
       ...normalizedDraft,
       createdAt: normalizedDraft.createdAt || new Date().toISOString(),
@@ -756,6 +1481,7 @@ export default function App() {
       winnerIds: w,
     };
 
+    setPlayerProfiles(synced.profiles);
     setHistory((prev) => [saved, ...prev]);
     const fresh = createFreshDraft();
     setDraft(fresh);
@@ -777,10 +1503,12 @@ export default function App() {
   function saveEdits() {
     if (!editGame) return;
     const normalizedPlayers = ensureUniqueNames(editGame.players || []);
-    const updated = { ...editGame, players: normalizedPlayers };
+    const synced = syncPlayerProfilesWithPlayers(playerProfiles, normalizedPlayers);
+    const updated = { ...editGame, players: synced.players };
     const t = computeTotals(updated.players, updated.rounds);
     const w = winnerIds(updated.players, t);
     const finalGame = { ...updated, totals: t, winnerIds: w, editedAt: new Date().toISOString() };
+    setPlayerProfiles(synced.profiles);
     setHistory((prev) => prev.map((g) => (g.id === editGameId ? finalGame : g)));
     setTab("history");
     setEditGameId("");
@@ -800,10 +1528,11 @@ export default function App() {
 
   function exportBackup() {
     const backup = {
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       draft,
       history,
+      playerProfiles,
     };
 
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
@@ -830,6 +1559,7 @@ export default function App() {
 
         const nextHistory = Array.isArray(parsed.history) ? parsed.history : null;
         const nextDraft = parsed.draft && typeof parsed.draft === "object" ? parsed.draft : null;
+        const nextProfiles = Array.isArray(parsed.playerProfiles) ? parsed.playerProfiles : [];
 
         if (!nextHistory || !nextDraft || !nextDraft.players || !nextDraft.rounds || !nextDraft.roundLabels) {
           alert("That backup file is missing required game data.");
@@ -842,10 +1572,12 @@ export default function App() {
 
         setHistory(nextHistory);
         setDraft(nextDraft);
+        setPlayerProfiles(nextProfiles);
         setTab("history");
         setUndoStack([]);
         localStorage.setItem(LS_HISTORY, JSON.stringify(nextHistory));
         localStorage.setItem(LS_DRAFT, JSON.stringify(nextDraft));
+        localStorage.setItem(LS_PLAYER_PROFILES, JSON.stringify(nextProfiles));
         alert("Backup imported.");
       } catch {
         alert("Could not read that backup file.");
@@ -875,10 +1607,43 @@ export default function App() {
     });
   }, [history, search, tagFilter]);
 
+  const playerStats = useMemo(() => {
+    return buildPlayerStats(history);
+  }, [history]);
+
+  const filteredProfiles = useMemo(() => {
+    const q = profileSearch.trim().toLowerCase();
+    if (!q) return playerProfiles;
+    return playerProfiles.filter((profile) => (profile.name || "").toLowerCase().includes(q));
+  }, [playerProfiles, profileSearch]);
+
+  const recentPlayerProfiles = useMemo(() => {
+    return [...playerProfiles].slice(0, 12);
+  }, [playerProfiles]);
+
   const roundsWon = useMemo(() => {
     if (!current) return {};
     return computeRoundsWon(current.players || [], current.rounds || []);
   }, [current]);
+
+  const standings = useMemo(() => {
+    if (!current) return [];
+    return buildStandings(current.players || [], totals, roundsWon);
+  }, [current, totals, roundsWon]);
+
+  const bestRound = useMemo(() => {
+    if (!current) return null;
+    return computeBestRound(current.players || [], current.rounds || []);
+  }, [current]);
+
+  const worstRound = useMemo(() => {
+    if (!current) return null;
+    return computeWorstRound(current.players || [], current.rounds || []);
+  }, [current]);
+
+  const scoreHelperTotal = useMemo(() => {
+    return computeScoreHelperTotal(scoreHelper?.counts || createScoreHelperCounts());
+  }, [scoreHelper]);
 
   const winners = useMemo(() => {
     if (!current) return [];
@@ -910,6 +1675,11 @@ export default function App() {
     rowEl.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
   }, [currentRoundIndex, tab]);
 
+  useEffect(() => {
+    if (!scoreHelper) return;
+    helperPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [scoreHelper]);
+
   return (
     <>
       <style>{styles}</style>
@@ -929,8 +1699,9 @@ export default function App() {
         {(tab === "new" || tab === "score") && (
           <div className="row" style={{ marginBottom: 10 }}>
             <button className="btn" onClick={undo} disabled={!undoStack.length}>⟲ Undo Last Change</button>
+            <button className="btn" onClick={() => focusNextIncompleteCell("draft")}>Next Empty Cell</button>
             <button className="btn" onClick={resetDraft}>Reset</button>
-            <div className="small" style={{ marginLeft: "auto" }}>Autosaving…</div>
+            <div className="small" style={{ marginLeft: "auto" }}>{saveStatus}</div>
           </div>
         )}
 
@@ -1006,6 +1777,30 @@ export default function App() {
                 ))}
               </div>
               <div className="hr" />
+              <div className="label">Saved Players</div>
+              {!recentPlayerProfiles.length ? (
+                <div className="small" style={{ marginBottom: 10 }}>Saved players will appear here after you finish and save games.</div>
+              ) : (
+                <div className="chips" style={{ marginBottom: 10 }}>
+                  {recentPlayerProfiles.map((profile) => {
+                    const alreadyInGame = (draft.players || []).some((player) => player.profileId === profile.id);
+                    return (
+                      <button
+                        key={profile.id}
+                        type="button"
+                        className={`chip ${alreadyInGame ? "on" : ""}`}
+                        onClick={() => addSavedPlayerToDraft(profile.id)}
+                        disabled={alreadyInGame}
+                        title={alreadyInGame ? "Already added" : "Add saved player"}
+                        style={{ opacity: alreadyInGame ? 0.65 : 1 }}
+                      >
+                        {profile.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="small" style={{ marginBottom: 10 }}>Tip: tap a saved player to reuse the same profile so long-term stats stay cleaner.</div>
               <div className="small">Rounds: <b>11</b> (3 → 13). Winner: <b>lowest total</b>. Mark ⭐ for who went out first each round (drives “Rounds Won”).</div>
               <div className="small" style={{ marginTop: 8 }}>Tip: Add players in seating/dealer order. The first player deals first, then dealer rotates across the row.</div>
             </div>
@@ -1027,6 +1822,7 @@ export default function App() {
               </div>
 
               <div className="row">
+                <button className="btn" onClick={() => focusNextIncompleteCell(context)}>Next Empty Cell</button>
                 {tab === "score" && (
                   <>
                     <button className="btn" onClick={addLatePlayer}>+ Add Player</button>
@@ -1043,9 +1839,131 @@ export default function App() {
             </div>
 
             <div className="hr" />
+            {scoreEntrySheet ? (
+              <div className="sheetOverlay" onClick={closeScoreEntrySheet}>
+                <div className="sheetPanel" onClick={(e) => e.stopPropagation()} ref={helperPanelRef}>
+                  <div className="sheetHandle" />
+                  <div className="helperHeader">
+                    <div>
+                      <div style={{ fontWeight: 900 }}>Score Entry</div>
+                      <div className="small">
+                        {scoreEntrySheet.playerName} • Round {scoreEntrySheet.rowLabel || scoreEntrySheet.rIdx + 1} • Wild: {getRoundMeta(scoreEntrySheet.rowLabel, scoreEntrySheet.rIdx).wild}
+                      </div>
+                    </div>
+                    <button className="btn" onClick={closeScoreEntrySheet}>Close</button>
+                  </div>
+
+                  <div className="grid" style={{ gap: 8 }}>
+                    <button className="quickActionBtn" onClick={chooseManualScoreEntry}>
+                      <div className="quickActionTitle">Type score manually</div>
+                      <div className="quickActionSub">Use the normal number input for this cell.</div>
+                    </button>
+
+                    <button className="quickActionBtn" onClick={applyWentOutZeroFromSheet}>
+                      <div className="quickActionTitle">Went out = 0</div>
+                      <div className="quickActionSub">Set this score to 0 and mark this player as went out first.</div>
+                    </button>
+
+                    {!scoreHelper ? (
+                      <button className="quickActionBtn" onClick={openScoreHelper}>
+                        <div className="quickActionTitle">Use score helper</div>
+                        <div className="quickActionSub">Add leftover cards and let the app calculate the total.</div>
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {scoreHelper ? (
+                    <div className="helperPanel">
+                      <div className="helperHeader">
+                        <div>
+                          <div style={{ fontWeight: 900 }}>Leftover Cards</div>
+                          <div className="small">Joker = 50 • Wild = 20 • J = 11 • Q = 12 • K = 13</div>
+                        </div>
+                        <button className="btn" onClick={closeScoreHelper}>Hide helper</button>
+                      </div>
+
+                      <div className="helperGrid" style={{ marginBottom: 12 }}>
+                        {["joker", "wild", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"].map((key) => (
+                          <div key={key} className="helperCard">
+                            <div className="helperCardTitle">
+                              {key === "joker" ? "Joker" : key === "wild" ? `Wild (${getRoundMeta(scoreEntrySheet.rowLabel, scoreEntrySheet.rIdx).wild})` : key}
+                            </div>
+                            <div className="helperStepper">
+                              <button type="button" className="helperMiniBtn" onClick={() => updateScoreHelperCount(key, -1)}>−</button>
+                              <div className="helperCount">{scoreHelper.counts?.[key] || 0}</div>
+                              <button type="button" className="helperMiniBtn" onClick={() => updateScoreHelperCount(key, 1)}>+</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
+                        <div style={{ fontWeight: 900 }}>Calculated total: {scoreHelperTotal}</div>
+                        <div className="row" style={{ flexWrap: "wrap" }}>
+                          <button className="btn" onClick={resetScoreHelper}>Reset</button>
+                          <button className="btn primary" onClick={() => applyScoreHelperTotal(false)}>Use Total</button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="summaryCard" style={{ marginBottom: 12 }}>
+              <div className="summaryTitle">Game Summary</div>
+              <div className="summaryWinner">
+                Winner: <b>{standings[0]?.name || "—"}</b>
+                {standings.length > 1 ? ` • ${standings[0]?.total ?? 0} total points` : ""}
+              </div>
+
+              <div className="summaryGrid" style={{ marginBottom: 12 }}>
+                <div className="summaryStat">
+                  <div className="summaryStatLabel">Best round</div>
+                  <div className="summaryStatValue">
+                    {bestRound
+                      ? `${current.players.find((p) => p.id === bestRound.playerId)?.name || "—"} • R ${current.roundLabels?.[bestRound.roundIndex] || bestRound.roundIndex + 1} • ${bestRound.score}`
+                      : "—"}
+                  </div>
+                </div>
+                <div className="summaryStat">
+                  <div className="summaryStatLabel">Highest round</div>
+                  <div className="summaryStatValue">
+                    {worstRound
+                      ? `${current.players.find((p) => p.id === worstRound.playerId)?.name || "—"} • R ${current.roundLabels?.[worstRound.roundIndex] || worstRound.roundIndex + 1} • ${worstRound.score}`
+                      : "—"}
+                  </div>
+                </div>
+                <div className="summaryStat">
+                  <div className="summaryStatLabel">Most rounds won</div>
+                  <div className="summaryStatValue">
+                    {standings.length
+                      ? `${[...standings].sort((a, b) => (b.roundsWon - a.roundsWon) || a.name.localeCompare(b.name))[0]?.name || "—"} • ${[...standings].sort((a, b) => (b.roundsWon - a.roundsWon) || a.name.localeCompare(b.name))[0]?.roundsWon ?? 0}`
+                      : "—"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="label">Standings</div>
+              <div className="standingsList">
+                {standings.map((player) => (
+                  <div key={player.id} className="standingRow">
+                    <div className="standingLeft">
+                      <div className="rankBadge">#{player.rank}</div>
+                      <div>
+                        <div className="standingName">{player.name}</div>
+                        <div className="standingMeta">Rounds won: {player.roundsWon}</div>
+                      </div>
+                    </div>
+                    <div style={{ fontWeight: 900 }}>{player.total}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
               <div className="small">Leader: <b>{winners.length ? current.players.filter((p) => winners.includes(p.id)).map((p) => p.name).join(", ") : "—"}</b></div>
-              <div className="small">Enter moves right → end of row goes down. ⭐ marks “went out first.” Tap a player name above to rename them.</div>
+              <div className="small">Enter moves right → end of row goes down. Use Next Empty Cell to jump back to the next missing score. ⭐ marks “went out first.” Tap a player name above to rename it inline.</div>
             </div>
             <div style={{ height: 10 }} />
 
@@ -1056,14 +1974,38 @@ export default function App() {
                     <th className="th round">Round</th>
                     {current.players.map((p) => (
                       <th className="th" key={p.id}>
-                        <button
-                          type="button"
-                          onClick={() => editPlayerName(p.id)}
-                          style={{ background: "transparent", border: "none", padding: 0, margin: 0, font: "inherit", color: "inherit", cursor: "pointer", textAlign: "left", fontWeight: 700 }}
-                          title="Rename player"
-                        >
-                          {p.name}
-                        </button>
+                        {renamingPlayerId === p.id ? (
+                          <div className="row" style={{ alignItems: "center", gap: 6 }}>
+                            <input
+                              className="input"
+                              value={renamingValue}
+                              autoFocus
+                              onChange={(e) => setRenamingValue(e.target.value)}
+                              onBlur={() => commitRenamingPlayer(p.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  commitRenamingPlayer(p.id);
+                                }
+                                if (e.key === "Escape") {
+                                  e.preventDefault();
+                                  cancelRenamingPlayer();
+                                }
+                              }}
+                              style={{ minWidth: 110, padding: "8px 10px" }}
+                              aria-label={`Rename ${p.name}`}
+                            />
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => startRenamingPlayer(p.id)}
+                            style={{ background: "transparent", border: "none", padding: 0, margin: 0, font: "inherit", color: "inherit", cursor: "pointer", textAlign: "left", fontWeight: 700 }}
+                            title="Rename player"
+                          >
+                            {p.name}
+                          </button>
+                        )}
                         {winners.includes(p.id) ? <span className="badge">leader</span> : null}
                       </th>
                     ))}
@@ -1109,6 +2051,11 @@ export default function App() {
                                 onKeyDown={(e) => onScoreKeyDown(e, rIdx, pIdx, context)}
                                 onChange={(e) => onScoreChange(rIdx, pIdx, e.target.value, context)}
                                 onFocus={(e) => e.target.select?.()}
+                                onClick={() => {
+                                  if (typeof val !== "number") {
+                                    openScoreEntrySheet(rIdx, pIdx);
+                                  }
+                                }}
                               />
                               <button className={`starBtn ${wentOut ? "on" : ""}`} onClick={() => toggleWentOut(rIdx, pIdx, context)} title={wentOut ? "Unmark went out first" : "Mark went out first"}>⭐</button>
                             </div>
@@ -1198,6 +2145,86 @@ export default function App() {
             </div>
 
             <div className="panel">
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <div>
+                  <div style={{ fontWeight: 900 }}>Player Stats</div>
+                  <div className="small">{playerStats.length} players tracked from saved games</div>
+                </div>
+              </div>
+              <div style={{ height: 10 }} />
+              {!playerStats.length ? (
+                <div className="small">No player stats yet. Finish and save some games first.</div>
+              ) : (
+                <div className="playerStatsList">
+                  {playerStats.map((player) => (
+                    <div key={player.key} className="playerStatCard">
+                      <div className="playerStatHeader">
+                        <div className="playerStatName">{player.name}</div>
+                        <div className="badge">{player.wins} win{player.wins === 1 ? "" : "s"}</div>
+                      </div>
+
+                      <div className="playerStatGrid">
+                        <div className="playerStatItem">
+                          <div className="playerStatLabel">Games</div>
+                          <div className="playerStatValue">{player.gamesPlayed}</div>
+                        </div>
+                        <div className="playerStatItem">
+                          <div className="playerStatLabel">Wins</div>
+                          <div className="playerStatValue">{player.wins}</div>
+                        </div>
+                        <div className="playerStatItem">
+                          <div className="playerStatLabel">2nd Place</div>
+                          <div className="playerStatValue">{player.second}</div>
+                        </div>
+                        <div className="playerStatItem">
+                          <div className="playerStatLabel">3rd Place</div>
+                          <div className="playerStatValue">{player.third}</div>
+                        </div>
+                        <div className="playerStatItem">
+                          <div className="playerStatLabel">Avg Points</div>
+                          <div className="playerStatValue">{player.averagePoints}</div>
+                        </div>
+                        <div className="playerStatItem">
+                          <div className="playerStatLabel">Best Finish</div>
+                          <div className="playerStatValue">{player.bestFinish === "—" ? "—" : `#${player.bestFinish}`}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="hr" />
+
+              <div className="label">Saved Players</div>
+              <input
+                className="input"
+                value={profileSearch}
+                onChange={(e) => setProfileSearch(e.target.value)}
+                placeholder="Search saved players…"
+                style={{ marginBottom: 10 }}
+              />
+              {!filteredProfiles.length ? (
+                <div className="small">No saved players yet.</div>
+              ) : (
+                <div className="historyList" style={{ marginBottom: 12 }}>
+                  {filteredProfiles.map((profile) => (
+                    <div key={profile.id} className="profileRow">
+                      <div>
+                        <div className="profileName">{profile.name}</div>
+                        <div className="small">Last used: {formatDate(profile.lastUsedAt || profile.createdAt)}</div>
+                      </div>
+                      <div className="profileActions">
+                        <button className="btn" onClick={() => renamePlayerProfile(profile.id)}>Rename</button>
+                        <button className="btn" onClick={() => deletePlayerProfile(profile.id)}>Delete</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="hr" />
+
               <div className="row" style={{ justifyContent: "space-between" }}>
                 <div>
                   <div style={{ fontWeight: 900 }}>Saved Games</div>
