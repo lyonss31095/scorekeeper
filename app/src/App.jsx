@@ -784,6 +784,19 @@ a{ color: inherit; }
   border-radius: 10px;
   cursor: pointer;
 }
+.addBtn{
+  border: 1px solid var(--border);
+  background: var(--chip);
+  color: var(--chipText);
+  min-width: 44px;
+  height: 34px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 0 10px;
+  white-space: nowrap;
+}
 .quickActionBtn{
   width: 100%;
   text-align: left;
@@ -1963,7 +1976,7 @@ export default function App() {
 
             <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
               <div className="small">Leader: <b>{winners.length ? current.players.filter((p) => winners.includes(p.id)).map((p) => p.name).join(", ") : "—"}</b></div>
-              <div className="small">Enter moves right → end of row goes down. Use Next Empty Cell to jump back to the next missing score. ⭐ marks “went out first.” Tap a player name above to rename it inline.</div>
+              <div className="small">Enter moves right → end of row goes down. Use Next Empty Cell to jump back to the next missing score. ⭐ marks “went out first.” Add opens quick scoring options and the score helper. Tap a player name above to rename it inline.</div>
             </div>
             <div style={{ height: 10 }} />
 
@@ -2051,13 +2064,9 @@ export default function App() {
                                 onKeyDown={(e) => onScoreKeyDown(e, rIdx, pIdx, context)}
                                 onChange={(e) => onScoreChange(rIdx, pIdx, e.target.value, context)}
                                 onFocus={(e) => e.target.select?.()}
-                                onClick={() => {
-                                  if (typeof val !== "number") {
-                                    openScoreEntrySheet(rIdx, pIdx);
-                                  }
-                                }}
                               />
                               <button className={`starBtn ${wentOut ? "on" : ""}`} onClick={() => toggleWentOut(rIdx, pIdx, context)} title={wentOut ? "Unmark went out first" : "Mark went out first"}>⭐</button>
+                              <button className="addBtn" onClick={() => openScoreEntrySheet(rIdx, pIdx)} title="Open score helper">Add</button>
                             </div>
                           </td>
                         );
