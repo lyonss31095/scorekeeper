@@ -894,6 +894,11 @@ a{ color: inherit; }
   font-size: 12px;
   color: var(--muted);
 }
+.scoreActions{
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
 .viewToggle{
   display:none;
   align-items:center;
@@ -934,6 +939,9 @@ a{ color: inherit; }
   margin-bottom:12px;
 }
 .mobileRoundWrap{
+  display:none;
+}
+.mobileLeaderStrip{
   display:none;
 }
 .mobileRoundHeader{
@@ -993,6 +1001,9 @@ a{ color: inherit; }
 .mobileScoreRow .addBtn{
   height:44px;
   border-radius:12px;
+}
+.mobileRoundFooter{
+  display:none;
 }
 @media (min-width: 760px){
   .helperGrid{ grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -1060,6 +1071,22 @@ a{ color: inherit; }
   }
   .table{ min-width: 680px; }
   .scoreInput{ width: 78px; }
+  .scoreHeader{
+    gap:10px;
+  }
+  .scoreActions{
+    width:100%;
+    flex-wrap:wrap;
+  }
+  .scoreActions .btn{
+    flex:1 1 auto;
+  }
+  .scoreActions .mobileSecondaryAction{
+    display:none;
+  }
+  .scoreActions .primary{
+    flex-basis:100%;
+  }
   .viewToggle{
     display:inline-flex;
     width:100%;
@@ -1075,8 +1102,25 @@ a{ color: inherit; }
     color:#4C1D95;
     box-shadow: inset 0 0 0 1px rgba(109,40,217,0.12);
   }
+  .scoreSummary{
+    display:none;
+  }
+  .mobileLeaderStrip{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:10px 12px;
+    border:1px solid #E9E3F4;
+    border-radius:14px;
+    background:#fff;
+    margin-bottom:10px;
+  }
   .tableWrap.mobileHidden{ display:none; }
   .mobileRoundWrap.show{ display:block; }
+  .mobileHelpText{
+    display:none;
+  }
   .activeToolbar{
     background:#fff;
     border-color:#E9E3F4;
@@ -1116,6 +1160,21 @@ a{ color: inherit; }
   .mobileScoreRow .starBtn.on{
     background:#FFF7D6;
     border-color:#F3D36A;
+  }
+  .mobileRoundFooter{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    margin-top:12px;
+  }
+  .mobileRoundStatus{
+    font-size:12px;
+    color:#6B5E8A;
+    text-align:center;
+  }
+  .mobileNextRoundBtn{
+    width:100%;
+    min-height:46px;
   }
   .summaryCard{
     background:#fff;
@@ -1158,6 +1217,7 @@ export default function App() {
   const [expandedFutureRounds, setExpandedFutureRounds] = useState({});
   const [scoreView, setScoreView] = useState("mobile");
   const [isSmallScreen, setIsSmallScreen] = useState(() => window.innerWidth <= 760);
+  const [mobileRoundIndex, setMobileRoundIndex] = useState(0);
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
   const inputRefs = useRef(new Map());
   const rowRefs = useRef(new Map());
@@ -1321,6 +1381,20 @@ export default function App() {
 
     return firstIncompleteRound === -1 ? current.rounds.length - 1 : firstIncompleteRound;
   }, [current]);
+
+  const activeMobileRoundIndex = Math.min(
+    Math.max(mobileRoundIndex, 0),
+    Math.max((current?.rounds?.length || 1) - 1, 0)
+  );
+  const displayRoundIndex = activeScoreView === "mobile" ? activeMobileRoundIndex : currentRoundIndex;
+  const displayRound = current?.rounds?.[displayRoundIndex];
+  const displayRoundComplete = Boolean(
+    current?.players?.length &&
+      current.players.every((player) => displayRound?.scores?.[player.id] != null)
+  );
+  const missingScoresInDisplayRound = current?.players?.filter(
+    (player) => displayRound?.scores?.[player.id] == null
+  ).length || 0;
 
   function addLatePlayer() {
     const newPlayerNumber = draft.players.length + 1;
@@ -1654,6 +1728,22 @@ export default function App() {
     focusCell(game.rounds.length - 1, game.players.length - 1);
   }
 
+  function goToNextMobileRound() {
+    if (!current?.rounds?.length) return;
+
+    if (!displayRoundComplete) {
+      const nextMissingIndex = current.players.findIndex(
+        (player) => displayRound?.scores?.[player.id] == null
+      );
+      if (nextMissingIndex >= 0) focusCell(displayRoundIndex, nextMissingIndex);
+      return;
+    }
+
+    const nextRoundIndex = Math.min(displayRoundIndex + 1, current.rounds.length - 1);
+    setMobileRoundIndex(nextRoundIndex);
+    setTimeout(() => focusCell(nextRoundIndex, 0), 0);
+  }
+
   function toggleFutureRoundExpanded(rIdx) {
     setExpandedFutureRounds((prev) => ({
       ...prev,
@@ -1696,6 +1786,7 @@ export default function App() {
 
     setPlayerProfiles(synced.profiles);
     setDraft((prev) => ({ ...prev, players: synced.players }));
+    setMobileRoundIndex(0);
     setTab("score");
     setTimeout(() => focusCell(0, 0), 0);
   }
@@ -1749,6 +1840,7 @@ export default function App() {
     setEditGameId(gameId);
     setEditGame(JSON.parse(JSON.stringify(g)));
     setUndoStack([]);
+    setMobileRoundIndex(0);
     setTab("edit");
     setTimeout(() => focusCell(0, 0), 0);
   }
@@ -1905,13 +1997,13 @@ export default function App() {
 
   const activeRoundMeta = useMemo(() => {
     if (!current?.roundLabels?.length) return null;
-    const label = current.roundLabels[currentRoundIndex];
+    const label = current.roundLabels[displayRoundIndex];
     return {
       label,
-      ...getRoundMeta(label, currentRoundIndex),
-      dealer: getDealerName(current.players || [], currentRoundIndex),
+      ...getRoundMeta(label, displayRoundIndex),
+      dealer: getDealerName(current.players || [], displayRoundIndex),
     };
-  }, [current, currentRoundIndex]);
+  }, [current, displayRoundIndex]);
 
   const hasDraftInProgress = useMemo(() => {
     const hasScores = (draft.rounds || []).some((r) =>
@@ -1954,7 +2046,15 @@ export default function App() {
           </div>
           <div className="tabs">
             <button className={`tab ${tab === "new" ? "active" : ""}`} onClick={() => setTab("new")}>New Game</button>
-            <button className={`tab ${tab === "score" ? "active" : ""}`} onClick={() => setTab("score")}>Scoring</button>
+            <button
+              className={`tab ${tab === "score" ? "active" : ""}`}
+              onClick={() => {
+                setMobileRoundIndex(currentRoundIndex);
+                setTab("score");
+              }}
+            >
+              Scoring
+            </button>
             <button className={`tab ${tab === "history" ? "active" : ""}`} onClick={() => setTab("history")}>History <span className="badge">{history.length}</span></button>
           </div>
         </div>
@@ -2006,7 +2106,13 @@ export default function App() {
                   <div className="small" style={{ marginBottom: 8 }}>
                     You already have a game in progress on this device.
                   </div>
-                  <button className="btn" onClick={() => setTab("score")}>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      setMobileRoundIndex(currentRoundIndex);
+                      setTab("score");
+                    }}
+                  >
                     Resume Current Game
                   </button>
                 </div>
@@ -2073,7 +2179,7 @@ export default function App() {
 
         {(tab === "score" || tab === "edit") && current && (
           <div className="panel">
-            <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
+            <div className="row scoreHeader" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
               <div>
                 <div style={{ fontWeight: 900, fontSize: 16 }}>
                   {(current.name || "").trim() ? current.name : "Game"}
@@ -2085,15 +2191,15 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="row">
+              <div className="scoreActions">
                 <div className="viewToggle" aria-label="Scoring view">
                   <button type="button" className={`viewToggleBtn ${activeScoreView === "mobile" ? "active" : ""}`} onClick={() => setScoreView("mobile")}>Mobile View</button>
                   <button type="button" className={`viewToggleBtn ${activeScoreView === "table" ? "active" : ""}`} onClick={() => setScoreView("table")}>Table View</button>
                 </div>
-                <button className="btn" onClick={() => focusNextIncompleteCell(context)}>Next Empty Cell</button>
+                <button className="btn mobileSecondaryAction" onClick={() => focusNextIncompleteCell(context)}>Next Empty Cell</button>
                 {tab === "score" && (
                   <>
-                    <button className="btn" onClick={addLatePlayer}>+ Add Player</button>
+                    <button className="btn mobileSecondaryAction" onClick={addLatePlayer}>+ Add Player</button>
                     <button className="btn primary" onClick={finishAndSave}>Finish & Save</button>
                   </>
                 )}
@@ -2178,7 +2284,7 @@ export default function App() {
               </div>
             ) : null}
 
-            <div className="summaryCard" style={{ marginBottom: 12 }}>
+            <div className="summaryCard scoreSummary" style={{ marginBottom: 12 }}>
               <div className="summaryTitle">Game Summary</div>
               <div className="summaryWinner">
                 Winner: <b>{standings[0]?.name || "—"}</b>
@@ -2229,6 +2335,14 @@ export default function App() {
               </div>
             </div>
 
+            <div className="mobileLeaderStrip">
+              <div>
+                <div className="small">Leader</div>
+                <div style={{ fontWeight: 900 }}>{standings[0]?.name || "—"}</div>
+              </div>
+              <div style={{ fontWeight: 900 }}>{standings[0]?.total ?? 0}</div>
+            </div>
+
             <div className="activeToolbar">
               <div>
                 <div style={{ fontWeight: 900 }}>Current Round: {activeRoundMeta?.label || "—"}</div>
@@ -2240,7 +2354,7 @@ export default function App() {
                 <div className="dealerPill">Cards: {activeRoundMeta?.cardsDealt ?? "—"}</div>
               </div>
             </div>
-            <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
+            <div className="row mobileHelpText" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
               <div className="small">Past rounds stay open. Future rounds after the next one collapse until you expand them.</div>
               <div className="small">Enter moves right → end of row goes down. Use Next Empty Cell to jump back to the next missing score. ⭐ marks “went out first.” Add opens quick scoring options and the score helper. Tap a player name above to rename it inline.</div>
             </div>
@@ -2253,8 +2367,8 @@ export default function App() {
               </div>
               <div className="mobilePlayerList">
                 {current.players.map((p, pIdx) => {
-                  const val = current.rounds?.[currentRoundIndex]?.scores?.[p.id];
-                  const wentOut = (current.rounds?.[currentRoundIndex]?.wentOutId || "") === p.id;
+                  const val = current.rounds?.[displayRoundIndex]?.scores?.[p.id];
+                  const wentOut = (current.rounds?.[displayRoundIndex]?.wentOutId || "") === p.id;
 
                   return (
                     <div className="mobilePlayerCard" key={p.id}>
@@ -2297,20 +2411,32 @@ export default function App() {
                           placeholder="Score"
                           value={typeof val === "number" ? String(val) : ""}
                           ref={(el) => {
-                            if (el) inputRefs.current.set(`${currentRoundIndex}_${pIdx}`, el);
-                            else inputRefs.current.delete(`${currentRoundIndex}_${pIdx}`);
+                            if (el) inputRefs.current.set(`${displayRoundIndex}_${pIdx}`, el);
+                            else inputRefs.current.delete(`${displayRoundIndex}_${pIdx}`);
                           }}
-                          onKeyDown={(e) => onScoreKeyDown(e, currentRoundIndex, pIdx, context)}
-                          onChange={(e) => onScoreChange(currentRoundIndex, pIdx, e.target.value, context)}
+                          onKeyDown={(e) => onScoreKeyDown(e, displayRoundIndex, pIdx, context)}
+                          onChange={(e) => onScoreChange(displayRoundIndex, pIdx, e.target.value, context)}
                           onFocus={(e) => e.target.select?.()}
-                          aria-label={`Score for ${p.name} in round ${activeRoundMeta?.label || currentRoundIndex + 1}`}
+                          aria-label={`Score for ${p.name} in round ${activeRoundMeta?.label || displayRoundIndex + 1}`}
                         />
-                        <button className={`starBtn ${wentOut ? "on" : ""}`} onClick={() => toggleWentOut(currentRoundIndex, pIdx, context)} title={wentOut ? "Unmark went out first" : "Mark went out first"}>⭐</button>
-                        <button className="addBtn" onClick={() => openScoreEntrySheet(currentRoundIndex, pIdx)} title="Open score helper">Add</button>
+                        <button className={`starBtn ${wentOut ? "on" : ""}`} onClick={() => toggleWentOut(displayRoundIndex, pIdx, context)} title={wentOut ? "Unmark went out first" : "Mark went out first"}>⭐</button>
+                        <button className="addBtn" onClick={() => openScoreEntrySheet(displayRoundIndex, pIdx)} title="Open score helper">Add</button>
                       </div>
                     </div>
                   );
                 })}
+              </div>
+              <div className="mobileRoundFooter">
+                <button className="btn primary mobileNextRoundBtn" onClick={goToNextMobileRound}>
+                  {displayRoundComplete ? "Next Round" : "Next Missing Score"}
+                </button>
+                <div className="mobileRoundStatus">
+                  {displayRoundComplete
+                    ? displayRoundIndex >= (current.rounds?.length || 1) - 1
+                      ? "Final round complete"
+                      : `Ready for round ${current.roundLabels?.[displayRoundIndex + 1] || displayRoundIndex + 2}`
+                    : `${missingScoresInDisplayRound} score${missingScoresInDisplayRound === 1 ? "" : "s"} left`}
+                </div>
               </div>
             </div>
 
@@ -2424,7 +2550,7 @@ export default function App() {
                                     inputRefs.current.delete(`${rIdx}_${pIdx}`);
                                     return;
                                   }
-                                  if (activeScoreView === "mobile" && rIdx === currentRoundIndex) return;
+                                  if (activeScoreView === "mobile" && rIdx === displayRoundIndex) return;
                                   inputRefs.current.set(`${rIdx}_${pIdx}`, el);
                                 }}
                                 onKeyDown={(e) => onScoreKeyDown(e, rIdx, pIdx, context)}
