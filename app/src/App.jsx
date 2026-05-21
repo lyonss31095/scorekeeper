@@ -944,6 +944,9 @@ a{ color: inherit; }
 .mobileLeaderStrip{
   display:none;
 }
+.mobileStandingsPanel{
+  display:none;
+}
 .mobileRoundHeader{
   border:1px solid var(--border);
   border-radius:14px;
@@ -1116,6 +1119,40 @@ a{ color: inherit; }
     background:#fff;
     margin-bottom:10px;
   }
+  .mobileStandingsPanel{
+    display:block;
+    margin-bottom:10px;
+  }
+  .mobileStandingsToggle{
+    width:100%;
+    min-height:42px;
+    background:#fff;
+    border-color:#E9E3F4;
+  }
+  .mobileStandingsList{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    margin-top:8px;
+  }
+  .mobileStandingRow{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:9px 10px;
+    border:1px solid #E9E3F4;
+    border-radius:12px;
+    background:#FBFAFF;
+    font-size:13px;
+  }
+  .mobileStandingName{
+    font-weight:800;
+  }
+  .mobileStandingMeta{
+    font-size:11px;
+    color:#6B5E8A;
+  }
   .tableWrap.mobileHidden{ display:none; }
   .mobileRoundWrap.show{ display:block; }
   .mobileHelpText{
@@ -1165,6 +1202,11 @@ a{ color: inherit; }
     display:flex;
     flex-direction:column;
     gap:8px;
+    position:sticky;
+    bottom:0;
+    z-index:5;
+    padding:10px 0 2px;
+    background: linear-gradient(180deg, rgba(246,244,251,0), #fff 28%);
     margin-top:12px;
   }
   .mobileRoundStatus{
@@ -1218,6 +1260,7 @@ export default function App() {
   const [scoreView, setScoreView] = useState("mobile");
   const [isSmallScreen, setIsSmallScreen] = useState(() => window.innerWidth <= 760);
   const [mobileRoundIndex, setMobileRoundIndex] = useState(0);
+  const [showMobileStandings, setShowMobileStandings] = useState(false);
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
   const inputRefs = useRef(new Map());
   const rowRefs = useRef(new Map());
@@ -2343,6 +2386,29 @@ export default function App() {
               <div style={{ fontWeight: 900 }}>{standings[0]?.total ?? 0}</div>
             </div>
 
+            <div className="mobileStandingsPanel">
+              <button
+                type="button"
+                className="btn mobileStandingsToggle"
+                onClick={() => setShowMobileStandings((prev) => !prev)}
+              >
+                {showMobileStandings ? "Hide Standings" : "Show Standings"}
+              </button>
+              {showMobileStandings ? (
+                <div className="mobileStandingsList">
+                  {standings.map((player) => (
+                    <div key={player.id} className="mobileStandingRow">
+                      <div>
+                        <div className="mobileStandingName">#{player.rank} {player.name}</div>
+                        <div className="mobileStandingMeta">Rounds won: {player.roundsWon}</div>
+                      </div>
+                      <div style={{ fontWeight: 900 }}>{player.total}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
             <div className="activeToolbar">
               <div>
                 <div style={{ fontWeight: 900 }}>Current Round: {activeRoundMeta?.label || "—"}</div>
@@ -2420,7 +2486,7 @@ export default function App() {
                           aria-label={`Score for ${p.name} in round ${activeRoundMeta?.label || displayRoundIndex + 1}`}
                         />
                         <button className={`starBtn ${wentOut ? "on" : ""}`} onClick={() => toggleWentOut(displayRoundIndex, pIdx, context)} title={wentOut ? "Unmark went out first" : "Mark went out first"}>⭐</button>
-                        <button className="addBtn" onClick={() => openScoreEntrySheet(displayRoundIndex, pIdx)} title="Open score helper">Add</button>
+                        <button className="addBtn" onClick={() => openScoreEntrySheet(displayRoundIndex, pIdx)} title="Open score helper">Helper</button>
                       </div>
                     </div>
                   );
