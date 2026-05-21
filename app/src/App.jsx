@@ -400,8 +400,39 @@ a{ color: inherit; }
   gap:12px;
   margin-bottom:14px;
 }
+.brandRow{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.appIcon{
+  width:38px;
+  height:38px;
+  border-radius:12px;
+  background: var(--primary);
+  color: var(--bg);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:900;
+  font-size:20px;
+  box-shadow: 0 8px 20px rgba(109,40,217,0.18);
+}
 .h1{ font-size: 22px; font-weight: 700; margin:0; }
 .sub{ font-size: 13px; color: var(--muted); margin-top:4px; }
+.statusPill{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 10px;
+  border:1px solid var(--border);
+  border-radius:999px;
+  background: rgba(255,255,255,0.7);
+  color: var(--muted);
+  font-size:12px;
+  font-weight:700;
+  white-space:nowrap;
+}
 .tabs{ display:flex; gap:8px; }
 .tab{
   border:1px solid var(--border);
@@ -894,6 +925,72 @@ a{ color: inherit; }
   font-size: 12px;
   color: var(--muted);
 }
+.setupPrimary{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.setupDetails{
+  border:1px solid var(--border);
+  border-radius:14px;
+  background: rgba(255,255,255,0.58);
+  padding:10px 12px;
+}
+.setupDetails summary{
+  cursor:pointer;
+  font-size:13px;
+  font-weight:900;
+  color: var(--text);
+}
+.setupDetailsBody{
+  padding-top:12px;
+}
+.gameCompleteCard{
+  border:1px solid var(--border);
+  border-radius:16px;
+  background: linear-gradient(180deg, rgba(109,40,217,0.08), rgba(255,255,255,0.86));
+  padding:14px;
+  margin-bottom:12px;
+}
+.completeEyebrow{
+  font-size:12px;
+  font-weight:800;
+  color:var(--primary);
+  margin-bottom:4px;
+}
+.completeTitle{
+  font-size:20px;
+  font-weight:950;
+  margin-bottom:6px;
+}
+.completeWinner{
+  color:var(--muted);
+  font-size:13px;
+  margin-bottom:10px;
+}
+.completeGrid{
+  display:grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap:8px;
+  margin-bottom:12px;
+}
+.completeStat{
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:10px;
+  background:rgba(255,255,255,0.78);
+}
+.completeStatLabel{
+  font-size:11px;
+  color:var(--muted);
+  font-weight:800;
+  text-transform:uppercase;
+  margin-bottom:3px;
+}
+.completeStatValue{
+  font-size:14px;
+  font-weight:900;
+}
 .scoreActions{
   display:flex;
   gap:8px;
@@ -1067,6 +1164,8 @@ a{ color: inherit; }
 @media (max-width: 760px){
   .container{ padding: 12px; }
   .header{ align-items:flex-start; flex-direction:column; }
+  .brandRow{ width:100%; }
+  .statusPill{ align-self:flex-start; }
   .tabs{ width:100%; overflow:auto; }
   .panel{
     padding: 12px;
@@ -1231,6 +1330,21 @@ a{ color: inherit; }
     background:#FBFAFF;
     border-color:#E9E3F4;
   }
+  .heroSub,
+  .heroChips{
+    display:none;
+  }
+  .setupDetails{
+    background:#FBFAFF;
+    border-color:#E9E3F4;
+  }
+  .gameCompleteCard{
+    background:#fff;
+    border-color:#E9E3F4;
+  }
+  .completeGrid{
+    grid-template-columns:1fr;
+  }
   .feedbackPrompt{ align-items:flex-start; flex-direction:column; }
 }
 `;
@@ -1262,6 +1376,7 @@ export default function App() {
   const [mobileRoundIndex, setMobileRoundIndex] = useState(0);
   const [showMobileStandings, setShowMobileStandings] = useState(false);
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
+  const [lastSavedGame, setLastSavedGame] = useState(null);
   const inputRefs = useRef(new Map());
   const rowRefs = useRef(new Map());
   const importFileRef = useRef(null);
@@ -1873,7 +1988,8 @@ export default function App() {
     setDraft(fresh);
     setUndoStack([]);
     localStorage.setItem(LS_DRAFT, JSON.stringify(fresh));
-    setShowFeedbackPrompt(true);
+    setLastSavedGame(saved);
+    setShowFeedbackPrompt(false);
     setTab("history");
   }
 
@@ -1999,6 +2115,23 @@ export default function App() {
     return buildPlayerStats(history);
   }, [history]);
 
+  const lastSavedSummary = useMemo(() => {
+    if (!lastSavedGame) return null;
+    const gameTotals = lastSavedGame.totals || computeTotals(lastSavedGame.players || [], lastSavedGame.rounds || []);
+    const gameRoundsWon = computeRoundsWon(lastSavedGame.players || [], lastSavedGame.rounds || []);
+    const gameStandings = buildStandings(lastSavedGame.players || [], gameTotals, gameRoundsWon);
+    return {
+      name: (lastSavedGame.name || "").trim() || "Game",
+      standings: gameStandings,
+      winnerNames: gameStandings
+        .filter((player) => player.rank === 1)
+        .map((player) => player.name)
+        .join(", "),
+      players: lastSavedGame.players?.length || 0,
+      savedAt: lastSavedGame.savedAt || lastSavedGame.createdAt,
+    };
+  }, [lastSavedGame]);
+
   const filteredProfiles = useMemo(() => {
     const q = profileSearch.trim().toLowerCase();
     if (!q) return playerProfiles;
@@ -2084,8 +2217,16 @@ export default function App() {
       <div className="container">
         <div className="header">
           <div>
-            <h1 className="h1">Scorekeeper</h1>
-            <div className="sub">5 Crowns-first • autosave • history • edit • rounds won</div>
+            <div className="brandRow">
+              <div className="appIcon">5</div>
+              <div>
+                <h1 className="h1">Scorekeeper</h1>
+                <div className="sub">Five Crowns scoring for game night</div>
+              </div>
+            </div>
+          </div>
+          <div className="statusPill">
+            {tab === "new" || tab === "score" ? saveStatus : `${history.length} saved game${history.length === 1 ? "" : "s"}`}
           </div>
           <div className="tabs">
             <button className={`tab ${tab === "new" ? "active" : ""}`} onClick={() => setTab("new")}>New Game</button>
@@ -2107,7 +2248,6 @@ export default function App() {
             <button className="btn" onClick={undo} disabled={!undoStack.length}>⟲ Undo Last Change</button>
             <button className="btn" onClick={() => focusNextIncompleteCell("draft")}>Next Empty Cell</button>
             <button className="btn" onClick={resetDraft}>Reset</button>
-            <div className="small" style={{ marginLeft: "auto" }}>{saveStatus}</div>
           </div>
         )}
 
@@ -2127,49 +2267,55 @@ export default function App() {
                   <div className="heroChip">Late join support</div>
                 </div>
               </div>
-              <div className="label">Game name (optional)</div>
-              <input className="input" value={draft.name} onChange={(e) => setDraftField("name", e.target.value)} placeholder="e.g., Friday Night 5 Crowns" />
-              <div style={{ height: 10 }} />
-              <div className="label">Location (optional)</div>
-              <input className="input" value={draft.location} onChange={(e) => setDraftField("location", e.target.value)} placeholder="e.g., Home, Cabin, Mike’s place" />
-              <div style={{ height: 10 }} />
-              <div className="label">Notes (optional)</div>
-              <textarea className="textarea" value={draft.notes} onChange={(e) => setDraftField("notes", e.target.value)} placeholder="Anything you want to remember about this game…" />
-              <div className="hr" />
-              <div className="label">Tags</div>
-              <div className="chips" style={{ marginBottom: 10 }}>
-                {DEFAULT_TAGS.map((t) => (
-                  <div key={t} className={`chip ${(draft.tags || []).includes(t) ? "on" : ""}`} onClick={() => toggleTag(t, "draft")} title="Click to toggle">{t}</div>
-                ))}
-              </div>
-              <TagAdder onAdd={(t) => addCustomTag(t, "draft")} />
-              <div className="hr" />
-              {hasDraftInProgress ? (
-                <div style={{ marginBottom: 12 }}>
-                  <div className="small" style={{ marginBottom: 8 }}>
-                    You already have a game in progress on this device.
+              <div className="setupPrimary">
+                {hasDraftInProgress ? (
+                  <div>
+                    <div className="small" style={{ marginBottom: 8 }}>
+                      You already have a game in progress on this device.
+                    </div>
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        setMobileRoundIndex(currentRoundIndex);
+                        setTab("score");
+                      }}
+                    >
+                      Resume Current Game
+                    </button>
                   </div>
-                  <button
-                    className="btn"
-                    onClick={() => {
-                      setMobileRoundIndex(currentRoundIndex);
-                      setTab("score");
-                    }}
-                  >
-                    Resume Current Game
-                  </button>
-                </div>
-              ) : null}
-              <button className="btn primary" onClick={startGame}>Start Scoring →</button>
-              <div className="noticeCard" style={{ marginTop: 10 }}>Games, history, and player stats are saved locally in this browser on this device.</div>
-              <div className="small" style={{ marginTop: 8 }}>Tip: Scoring screen uses rounds as rows and players as columns. Enter moves right.</div>
-              <div style={{ height: 10 }} />
-              <a
-                className="btn"
-                href="mailto:lyonss31095@yahoo.com?subject=Five%20Crowns%20Scorekeeper%20Feedback"
-              >
-                Send Feedback
-              </a>
+                ) : null}
+                <button className="btn primary" onClick={startGame}>Start Scoring →</button>
+                <div className="noticeCard">Saved locally in this browser. Export a backup anytime.</div>
+
+                <details className="setupDetails">
+                  <summary>Game details</summary>
+                  <div className="setupDetailsBody">
+                    <div className="label">Game name (optional)</div>
+                    <input className="input" value={draft.name} onChange={(e) => setDraftField("name", e.target.value)} placeholder="e.g., Friday Night 5 Crowns" />
+                    <div style={{ height: 10 }} />
+                    <div className="label">Location (optional)</div>
+                    <input className="input" value={draft.location} onChange={(e) => setDraftField("location", e.target.value)} placeholder="e.g., Home, Cabin, Mike’s place" />
+                    <div style={{ height: 10 }} />
+                    <div className="label">Notes (optional)</div>
+                    <textarea className="textarea" value={draft.notes} onChange={(e) => setDraftField("notes", e.target.value)} placeholder="Anything you want to remember about this game…" />
+                    <div className="hr" />
+                    <div className="label">Tags</div>
+                    <div className="chips" style={{ marginBottom: 10 }}>
+                      {DEFAULT_TAGS.map((t) => (
+                        <div key={t} className={`chip ${(draft.tags || []).includes(t) ? "on" : ""}`} onClick={() => toggleTag(t, "draft")} title="Click to toggle">{t}</div>
+                      ))}
+                    </div>
+                    <TagAdder onAdd={(t) => addCustomTag(t, "draft")} />
+                  </div>
+                </details>
+
+                <a
+                  className="btn"
+                  href="mailto:lyonss31095@yahoo.com?subject=Five%20Crowns%20Scorekeeper%20Feedback"
+                >
+                  Send Feedback
+                </a>
+              </div>
             </div>
 
             <div className="panel">
@@ -2677,6 +2823,39 @@ export default function App() {
 
         {tab === "history" && (
           <>
+            {lastSavedSummary ? (
+              <div className="gameCompleteCard">
+                <div className="completeEyebrow">Game saved</div>
+                <div className="completeTitle">{lastSavedSummary.name} complete</div>
+                <div className="completeWinner">
+                  Winner: <b>{lastSavedSummary.winnerNames || "—"}</b>
+                  {lastSavedSummary.standings[0] ? ` • ${lastSavedSummary.standings[0].total} points` : ""}
+                </div>
+                <div className="completeGrid">
+                  <div className="completeStat">
+                    <div className="completeStatLabel">Players</div>
+                    <div className="completeStatValue">{lastSavedSummary.players}</div>
+                  </div>
+                  <div className="completeStat">
+                    <div className="completeStatLabel">Saved</div>
+                    <div className="completeStatValue">{formatDate(lastSavedSummary.savedAt)}</div>
+                  </div>
+                </div>
+                <div className="row" style={{ flexWrap: "wrap" }}>
+                  <button
+                    className="btn primary"
+                    onClick={() => {
+                      setLastSavedGame(null);
+                      setTab("new");
+                    }}
+                  >
+                    New Game
+                  </button>
+                  <button className="btn" onClick={() => setLastSavedGame(null)}>View History</button>
+                  <a className="btn" href="mailto:lyonss31095@yahoo.com?subject=Five%20Crowns%20Scorekeeper%20Feedback">Send Feedback</a>
+                </div>
+              </div>
+            ) : null}
             {showFeedbackPrompt ? (
               <div className="feedbackPrompt">
                 <div>Thanks for saving a game. Feedback helps make the iPhone scoring flow better.</div>
