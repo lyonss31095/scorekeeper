@@ -991,6 +991,28 @@ a{ color: inherit; }
   font-size:14px;
   font-weight:900;
 }
+.backupCard{
+  border:1px solid rgba(109,40,217,0.20);
+  border-radius:16px;
+  background: linear-gradient(180deg, rgba(109,40,217,0.07), rgba(255,255,255,0.86));
+  padding:14px;
+  margin-bottom:12px;
+}
+.backupTitle{
+  font-size:15px;
+  font-weight:950;
+  margin-bottom:4px;
+}
+.backupText{
+  font-size:12px;
+  color:var(--muted);
+  margin-bottom:10px;
+}
+.backupActions{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
 .scoreActions{
   display:flex;
   gap:8px;
@@ -1341,6 +1363,13 @@ a{ color: inherit; }
   .gameCompleteCard{
     background:#fff;
     border-color:#E9E3F4;
+  }
+  .backupCard{
+    background:#fff;
+    border-color:#E9E3F4;
+  }
+  .backupActions .btn{
+    flex:1 1 auto;
   }
   .completeGrid{
     grid-template-columns:1fr;
@@ -2841,6 +2870,9 @@ export default function App() {
                     <div className="completeStatValue">{formatDate(lastSavedSummary.savedAt)}</div>
                   </div>
                 </div>
+                <div className="noticeCard" style={{ marginBottom: 12 }}>
+                  Before removing the Home Screen app, clearing Safari data, or switching phones, export a backup.
+                </div>
                 <div className="row" style={{ flexWrap: "wrap" }}>
                   <button
                     className="btn primary"
@@ -2851,6 +2883,7 @@ export default function App() {
                   >
                     New Game
                   </button>
+                  <button className="btn" onClick={exportBackup}>Export Backup</button>
                   <button className="btn" onClick={() => setLastSavedGame(null)}>View History</button>
                   <a className="btn" href="mailto:lyonss31095@yahoo.com?subject=Five%20Crowns%20Scorekeeper%20Feedback">Send Feedback</a>
                 </div>
@@ -2865,7 +2898,16 @@ export default function App() {
                 </div>
               </div>
             ) : null}
-            <div className="noticeCard" style={{ marginBottom: 12 }}>Saved games, history, and player stats stay in this browser on this device unless you export or import a backup.</div>
+            <div className="backupCard">
+              <div className="backupTitle">Protect your scores</div>
+              <div className="backupText">
+                Saved games live on this browser/device. Export a backup before removing the Home Screen app, clearing Safari data, or changing phones.
+              </div>
+              <div className="backupActions">
+                <button className="btn primary" onClick={exportBackup}>Export Backup</button>
+                <button className="btn" onClick={() => importFileRef.current?.click()}>Import Backup</button>
+              </div>
+            </div>
           <div className="grid">
             <div className="panel">
               <div className="label">Search</div>
