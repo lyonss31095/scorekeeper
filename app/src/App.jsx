@@ -450,6 +450,30 @@ a{ color: inherit; }
   border-radius: 16px;
   padding: 14px;
 }
+.sectionHeader{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:10px;
+}
+.sectionTitle{
+  font-size:16px;
+  font-weight:950;
+}
+.sectionSub{
+  font-size:12px;
+  color:var(--muted);
+  margin-top:2px;
+}
+.quietPanel{
+  background: rgba(255,255,255,0.74);
+}
+.primaryAction{
+  width:100%;
+  min-height:44px;
+  font-weight:900;
+}
 .grid{
   display:grid;
   grid-template-columns: 1fr;
@@ -501,6 +525,21 @@ a{ color: inherit; }
 .chip.on{
   background: var(--panel);
   border-color: var(--primary);
+}
+.savedPlayerChip{
+  border-radius:12px;
+  padding:8px 11px;
+}
+.playerSetupList{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.playerSetupRow{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:8px;
+  align-items:center;
 }
 .tableWrap{
   border: 1px solid var(--border);
@@ -667,15 +706,27 @@ a{ color: inherit; }
   text-align:left;
   width:100%;
   border: 1px solid var(--border);
-  background: transparent;
+  background: rgba(255,255,255,0.72);
   color: var(--text);
-  padding: 12px;
+  padding: 14px;
   border-radius: 14px;
   cursor:pointer;
 }
-.historyItem.active{ border-color: var(--primary); }
-.historyTitle{ font-weight: 800; }
+.historyItem.active{ border-color: var(--primary); box-shadow: 0 0 0 3px rgba(109,40,217,0.08); }
+.historyItemTop{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:4px;
+}
+.historyTitle{ font-weight: 900; font-size:14px; }
 .historyMeta{ margin-top: 4px; font-size: 12px; color: var(--muted); }
+.historyWinner{
+  flex:0 0 auto;
+  margin-left:0;
+  background:#FBFAFF;
+}
 .summaryCard{
   border: 1px solid var(--border);
   background: linear-gradient(180deg, rgba(109,40,217,0.06), rgba(109,40,217,0.02));
@@ -763,7 +814,7 @@ a{ color: inherit; }
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 12px;
-  background: rgba(255,255,255,0.65);
+  background: rgba(255,255,255,0.76);
 }
 .playerStatHeader{
   display:flex;
@@ -807,6 +858,14 @@ a{ color: inherit; }
   border:1px solid var(--border);
   border-radius:12px;
   background: rgba(255,255,255,0.7);
+}
+.emptyState{
+  border:1px dashed var(--border);
+  border-radius:14px;
+  padding:14px;
+  color:var(--muted);
+  font-size:13px;
+  background:rgba(255,255,255,0.5);
 }
 .profileName{
   font-weight:800;
@@ -1192,6 +1251,15 @@ a{ color: inherit; }
   .panel{
     padding: 12px;
     background: #fff;
+  }
+  .sectionHeader{
+    align-items:center;
+  }
+  .playerSetupRow{
+    grid-template-columns:1fr;
+  }
+  .playerSetupRow .btn{
+    justify-self:start;
   }
   .table{ min-width: 680px; }
   .scoreInput{ width: 78px; }
@@ -2313,7 +2381,7 @@ export default function App() {
                     </button>
                   </div>
                 ) : null}
-                <button className="btn primary" onClick={startGame}>Start Scoring →</button>
+                <button className="btn primary primaryAction" onClick={startGame}>Start Scoring →</button>
                 <div className="noticeCard">Saved locally in this browser. Export a backup anytime.</div>
 
                 <details className="setupDetails">
@@ -2347,18 +2415,17 @@ export default function App() {
               </div>
             </div>
 
-            <div className="panel">
-              <div className="row" style={{ justifyContent: "space-between" }}>
+            <div className="panel quietPanel">
+              <div className="sectionHeader">
                 <div>
-                  <div style={{ fontWeight: 800 }}>Players</div>
-                  <div className="small">Add players, rename them, remove as needed.</div>
+                  <div className="sectionTitle">Players</div>
+                  <div className="sectionSub">Set seating order, then start scoring.</div>
                 </div>
                 <button className="btn" onClick={() => addPlayer("draft")}>+ Add player</button>
               </div>
-              <div style={{ height: 10 }} />
-              <div className="historyList">
+              <div className="playerSetupList">
                 {draft.players.map((p, idx) => (
-                  <div key={p.id} className="row">
+                  <div key={p.id} className="playerSetupRow">
                     <input className="input" value={p.name} onChange={(e) => setPlayerName(p.id, e.target.value, "draft")} placeholder={`Player ${idx + 1}`} />
                     <button className="btn" disabled={draft.players.length <= 2} onClick={() => removePlayer(p.id, "draft")}>Remove</button>
                   </div>
@@ -2376,7 +2443,7 @@ export default function App() {
                       <button
                         key={profile.id}
                         type="button"
-                        className={`chip ${alreadyInGame ? "on" : ""}`}
+                        className={`chip savedPlayerChip ${alreadyInGame ? "on" : ""}`}
                         onClick={() => addSavedPlayerToDraft(profile.id)}
                         disabled={alreadyInGame}
                         title={alreadyInGame ? "Already added" : "Add saved player"}
@@ -2909,7 +2976,13 @@ export default function App() {
               </div>
             </div>
           <div className="grid">
-            <div className="panel">
+            <div className="panel quietPanel">
+              <div className="sectionHeader">
+                <div>
+                  <div className="sectionTitle">Find Games</div>
+                  <div className="sectionSub">Search by player, place, notes, or tag.</div>
+                </div>
+              </div>
               <div className="label">Search</div>
               <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, players, notes, location, tags…" />
               <div style={{ height: 10 }} />
@@ -2921,7 +2994,7 @@ export default function App() {
                 ))}
               </div>
               <div className="hr" />
-              <div className="small">Tip: Tap a game to view/edit. History is stored locally on this device.</div>
+              <div className="small">Tap a saved game to view or edit it.</div>
               <div className="hr" />
               <div className="label">Backup</div>
               <div className="row" style={{ flexWrap: "wrap" }}>
@@ -2944,16 +3017,15 @@ export default function App() {
               </div>
             </div>
 
-            <div className="panel">
-              <div className="row" style={{ justifyContent: "space-between" }}>
+            <div className="panel quietPanel">
+              <div className="sectionHeader">
                 <div>
-                  <div style={{ fontWeight: 900 }}>Player Stats</div>
-                  <div className="small">{playerStats.length} players tracked from saved games</div>
+                  <div className="sectionTitle">Player Stats</div>
+                  <div className="sectionSub">{playerStats.length} players tracked from saved games</div>
                 </div>
               </div>
-              <div style={{ height: 10 }} />
               {!playerStats.length ? (
-                <div className="small">No player stats yet. Finish and save some games first.</div>
+                <div className="emptyState">No player stats yet. Finish and save some games first.</div>
               ) : (
                 <div className="playerStatsList">
                   {playerStats.map((player) => (
@@ -2996,7 +3068,12 @@ export default function App() {
 
               <div className="hr" />
 
-              <div className="label">Saved Players</div>
+              <div className="sectionHeader">
+                <div>
+                  <div className="sectionTitle">Saved Players</div>
+                  <div className="sectionSub">Reuse profiles to keep long-term stats cleaner.</div>
+                </div>
+              </div>
               <input
                 className="input"
                 value={profileSearch}
@@ -3005,7 +3082,7 @@ export default function App() {
                 style={{ marginBottom: 10 }}
               />
               {!filteredProfiles.length ? (
-                <div className="small">No saved players yet.</div>
+                <div className="emptyState">No saved players yet.</div>
               ) : (
                 <div className="historyList" style={{ marginBottom: 12 }}>
                   {filteredProfiles.map((profile) => (
@@ -3025,15 +3102,14 @@ export default function App() {
 
               <div className="hr" />
 
-              <div className="row" style={{ justifyContent: "space-between" }}>
+              <div className="sectionHeader">
                 <div>
-                  <div style={{ fontWeight: 900 }}>Saved Games</div>
-                  <div className="small">{filteredHistory.length} shown</div>
+                  <div className="sectionTitle">Saved Games</div>
+                  <div className="sectionSub">{filteredHistory.length} shown</div>
                 </div>
               </div>
-              <div style={{ height: 10 }} />
               {!filteredHistory.length ? (
-                <div className="small">No games yet. Finish a game to save it.</div>
+                <div className="emptyState">No games yet. Finish a game to save it.</div>
               ) : (
                 <div className="historyList">
                   {filteredHistory.map((g) => {
@@ -3042,7 +3118,10 @@ export default function App() {
                     const winnerNames = (g.players || []).filter((p) => w.includes(p.id)).map((p) => p.name).join(", ");
                     return (
                       <button key={g.id} className={`historyItem ${editGameId === g.id ? "active" : ""}`} onClick={() => openForEdit(g.id)}>
-                        <div className="historyTitle">{(g.name || "").trim() ? g.name : "Game"} <span className="badge">{winnerNames ? `Winner: ${winnerNames}` : "—"}</span></div>
+                        <div className="historyItemTop">
+                          <div className="historyTitle">{(g.name || "").trim() ? g.name : "Game"}</div>
+                          <span className="badge historyWinner">{winnerNames ? `Winner: ${winnerNames}` : "—"}</span>
+                        </div>
                         <div className="historyMeta">{formatDate(g.savedAt || g.createdAt)}{g.location ? ` • ${g.location}` : ""}</div>
                         <div className="historyMeta">Players: {(g.players || []).map((p) => p.name).join(", ")}</div>
                         <div className="historyMeta">Tags: {(g.tags || []).length ? (g.tags || []).join(", ") : "—"}</div>
