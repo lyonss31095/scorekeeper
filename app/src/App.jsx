@@ -609,10 +609,15 @@ a{ color: inherit; }
   gap:10px;
   flex-wrap:wrap;
   border: 1px solid var(--border);
-  background: rgba(109,40,217,0.06);
+  background: linear-gradient(180deg, rgba(109,40,217,0.08), rgba(255,255,255,0.68));
   border-radius: 14px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   margin-bottom: 10px;
+}
+.activeRoundTitle{
+  font-size:17px;
+  font-weight:950;
+  margin-bottom:2px;
 }
 .activeToolbarMeta{
   display:flex;
@@ -1143,6 +1148,10 @@ a{ color: inherit; }
   padding:12px;
   background: rgba(255,255,255,0.72);
 }
+.mobilePlayerCard.isWentOut{
+  border-color:#F3D36A;
+  background: linear-gradient(180deg, #FFFDF2, #fff);
+}
 .mobilePlayerTop{
   display:flex;
   align-items:flex-start;
@@ -1166,9 +1175,31 @@ a{ color: inherit; }
   flex-wrap:wrap;
   justify-content:flex-end;
 }
+.mobileStatBadge{
+  display:inline-flex;
+  flex-direction:column;
+  gap:1px;
+  min-width:54px;
+  padding:5px 8px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:#FBFAFF;
+  text-align:center;
+}
+.mobileStatLabel{
+  color:var(--muted);
+  font-size:10px;
+  font-weight:800;
+  text-transform:uppercase;
+}
+.mobileStatValue{
+  color:var(--text);
+  font-size:14px;
+  font-weight:950;
+}
 .mobileScoreRow{
   display:grid;
-  grid-template-columns: minmax(0, 1fr) 44px 58px;
+  grid-template-columns: minmax(0, 1fr) 46px 70px;
   gap:8px;
   align-items:center;
 }
@@ -1350,6 +1381,10 @@ a{ color: inherit; }
   .activeToolbar{
     background:#fff;
     border-color:#E9E3F4;
+    box-shadow:0 8px 22px rgba(31,21,54,0.04);
+  }
+  .activeRoundTitle{
+    font-size:18px;
   }
   .dealerPill,
   .currentPill{
@@ -1357,21 +1392,22 @@ a{ color: inherit; }
     color:#5B21B6;
   }
   .mobileRoundHeader{
-    background:#FBFAFF;
+    background:linear-gradient(180deg, #FBFAFF, #fff);
     border-color:#E9E3F4;
+    box-shadow:0 8px 22px rgba(31,21,54,0.04);
   }
   .mobilePlayerCard{
     background:#fff;
     border-color:#E9E3F4;
-    box-shadow: 0 8px 22px rgba(31, 21, 54, 0.05);
+    box-shadow: 0 8px 22px rgba(31, 21, 54, 0.045);
   }
-  .mobilePlayerMeta .badge{
-    background:#FBFAFF;
-    margin-left:0;
+  .mobilePlayerName{
+    font-size:16px;
   }
   .mobileScoreRow .scoreInput{
     background:#FBFAFF;
     border-color:#DED6EC;
+    text-align:center;
   }
   .mobileScoreRow .scoreInput:focus{
     background:#fff;
@@ -1382,6 +1418,7 @@ a{ color: inherit; }
     background:#fff;
     border-color:#DED6EC;
     color:#312A40;
+    font-weight:900;
   }
   .mobileScoreRow .starBtn.on{
     background:#FFF7D6;
@@ -2653,7 +2690,7 @@ export default function App() {
 
             <div className="activeToolbar">
               <div>
-                <div style={{ fontWeight: 900 }}>Current Round: {activeRoundMeta?.label || "—"}</div>
+                <div className="activeRoundTitle">Current Round: {activeRoundMeta?.label || "—"}</div>
                 <div className="small">Leader: <b>{winners.length ? current.players.filter((p) => winners.includes(p.id)).map((p) => p.name).join(", ") : "—"}</b></div>
               </div>
               <div className="activeToolbarMeta">
@@ -2679,7 +2716,7 @@ export default function App() {
                   const wentOut = (current.rounds?.[displayRoundIndex]?.wentOutId || "") === p.id;
 
                   return (
-                    <div className="mobilePlayerCard" key={p.id}>
+                    <div className={`mobilePlayerCard ${wentOut ? "isWentOut" : ""}`} key={p.id}>
                       <div className="mobilePlayerTop">
                         <div>
                           {renamingPlayerId === p.id ? (
@@ -2708,8 +2745,14 @@ export default function App() {
                           )}
                         </div>
                         <div className="mobilePlayerMeta">
-                          <span className={`badge ${winners.includes(p.id) ? "winnerCell" : ""}`}>Total {totals[p.id] ?? 0}</span>
-                          <span className="badge">Won {roundsWon[p.id] ?? 0}</span>
+                          <span className="mobileStatBadge">
+                            <span className="mobileStatLabel">Total</span>
+                            <span className="mobileStatValue">{totals[p.id] ?? 0}</span>
+                          </span>
+                          <span className="mobileStatBadge">
+                            <span className="mobileStatLabel">Won</span>
+                            <span className="mobileStatValue">{roundsWon[p.id] ?? 0}</span>
+                          </span>
                         </div>
                       </div>
                       <div className="mobileScoreRow">
